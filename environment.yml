@@ -1,0 +1,11 @@
+name: carbon-gan
+channels:
+  - defaults
+dependencies:
+  - anaconda
+  - numpy
+  - pandas
+  - python=3
+  - pytorch
+  - torchvision
+  - tensorboard
