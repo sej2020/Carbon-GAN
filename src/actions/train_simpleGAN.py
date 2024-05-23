@@ -3,9 +3,7 @@ Script for training a simple GAN model.
 
 Typical usage example:
 ```bash
->>> python -m src.actions.train_simpleGAN --region "AUS_QLD" --elec_source "solar" --n_epochs 100 --batch_size 64 --lr 0.0002 --k 1 
-... --run_name "solar_GAN" --lr_scheduler True --disable_tqdm False --logging_dir "logs" --logging_frequency 0.1 --resume_from_cpt False 
-... --cpt_path None --metadata_dim 9 --window_size 24
+>>> python -m src.actions.train_simpleGAN --debug --region AUS_QLD --elec_source solar --n_epochs 1000 --batch_size 64 --k 1
 ```
 And to view the training progress, run the following command in the terminal:
 ```bash
@@ -40,7 +38,7 @@ parser.add_argument("--batch_size", type=int, required=True)
 parser.add_argument("--lr", type=float, default=0.001)
 parser.add_argument("--k", type=int, default=4, help="Number of times to train the discriminator for each generator training step")
 parser.add_argument("--run_name", type=str, default=None)
-parser.add_argument("--lr_scheduler", action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument("--lr_scheduler", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--logging_frequency", type=float, default=0.1)
 parser.add_argument("--resume_from_cpt", type=argparse.BooleanOptionalAction, default=False)

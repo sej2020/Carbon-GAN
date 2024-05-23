@@ -8,6 +8,7 @@ from src.utils.data import CarbonDataset
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from joblib import dump
+import time
 
 class SimpleGAN(torch.nn.Module):
     """
@@ -38,11 +39,11 @@ class SimpleGAN(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(metadata_dim, metadata_dim)
         )
-        self.data_generator = torch.nn.RNN(metadata_dim, 1, nonlinearity='relu') 
+        self.data_generator = torch.nn.RNN(metadata_dim+1, 1, nonlinearity='relu', batch_first=True)
         self.discriminator = torch.nn.Sequential(
-            torch.nn.Linear(window_size, 12),
+            torch.nn.Linear(metadata_dim+window_size, 16),
             torch.nn.ReLU(),
-            torch.nn.Linear(12, 1),
+            torch.nn.Linear(16, 1),
             torch.nn.Sigmoid()
         )
         self.metadata_dim = metadata_dim
@@ -116,65 +117,84 @@ class SimpleGAN(torch.nn.Module):
                 initial=self.checkpoint_dict["epoch"] + 1,
             )
 
-        dataloader = DataLoader(
-            data, 
-            batch_size = (self.window_size + self.cfg.batch_size) * self.cfg.k, 
-            drop_last = True, shuffle = False
-            )
-
         for epoch_n in pbar:
-            epoch_loss = []
-            dataloader.dataset = dataloader.dataset.roll(epoch_n % self.window_size)
-            for (batch_m, batch_d) in dataloader: # ( [dims, (window+batch)*k] , [1, (window+batch)*k] )
+            epoch_loss_D = []
+            epoch_loss_G = []
+            if epoch_n % self.window_size == 0:
+                data._unroll()
+            else:
+                data._roll(epoch_n % self.window_size)
+            dataloader = DataLoader(
+                data, 
+                batch_size = (self.window_size + self.cfg.batch_size) * self.cfg.k, 
+                drop_last = True, shuffle = False
+            )
+            for b_idx, (batch_m, batch_d) in enumerate(dataloader): # ( [(window+batch)*k, dims] , [(window+batch)*k, 1] )
+                self.discriminator.train(True)
                 for k in range(self.cfg.k):
                     k_batch_m_lst = []
                     k_batch_d_lst = []
                     for b in range(self.cfg.batch_size):
-                        k_batch_m_lst.append(batch_m[:, k*(self.window_size + self.cfg.batch_size) + b]) # [dims, 1]
-                        k_batch_d_lst.append(batch_d[:, k*(self.window_size+self.cfg.batch_size) + b : k*(self.window_size+self.cfg.batch_size) + b + self.window_size]) # [window, 1]
-                    k_batch_m = torch.stack(k_batch_m_lst, dim=1).squeeze() # [dims, batch]
-                    k_batch_d = torch.stack(k_batch_d_lst, dim=1).squeeze() # [window, batch]
+                        k_batch_m_lst.append(batch_m[k*(self.window_size + self.cfg.batch_size) + b, :]) # [1, dims]
+                        k_batch_d_lst.append(batch_d[k*(self.window_size + self.cfg.batch_size) + b : k*(self.window_size+self.cfg.batch_size) + b + self.window_size, :]) # [window, 1]
+                    k_batch_m = torch.stack(k_batch_m_lst, dim=0).squeeze() # [batch, dims]
+                    k_batch_d = torch.stack(k_batch_d_lst, dim=1).squeeze().T # [batch, window]
 
-                    k_batch_x = torch.cat((k_batch_m, k_batch_d), dim=0) # [dims+window, batch]
-                    
-                    z_mD = torch.randn(1, self.cfg.batch_size, self.metadata_dim) # [1, batch, dims]
-                    z_dD = torch.randn(self.window_size, self.cfg.batch_size, 1)  # [window, batch, 1]
+                    k_batch_x = torch.cat((k_batch_m, k_batch_d), dim=1) # [batch, dims+window]
+
+                    z_mD = torch.randn(self.cfg.batch_size, self.metadata_dim) # [batch, dims]
+                    z_dD = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
                     with torch.no_grad():
-                        # [dims, batch] -> [dims, batch]
-                        g_mD = self.metadata_generator.forward(z_mD.squeeze().T)
-                        # [window, batch, dims] + [window, batch, 1] = [window, batch, dims+1] -> [window, batch]
-                        g_dD = self.data_generator.forward(torch.cat((z_mD.repeat(self.window_size, 1, 1),z_dD), dim=2)).squeeze()
-                        # [dims, batch] + [window, batch] = [dims+window, batch]
-                        g_xD = torch.cat((g_mD, g_dD), dim=0)
-                    # [dims+window, batch] -> [batch]
+                        # [batch, dims] -> [batch, dims]
+                        g_mD = self.metadata_generator.forward(z_mD)
+                        # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1] -> [batch, window]
+                        g_dD = self.data_generator.forward(torch.cat((z_mD.unsqueeze(1).repeat(1, self.window_size, 1), z_dD.unsqueeze(2)), dim=2))[0].squeeze()
+                        # [batch, dims] + [batch, window] = [batch, dims+window]
+                        g_xD = torch.cat((g_mD, g_dD), dim=1)
+                    # [batch, dims+window] -> [batch]
                     d_gxD = self.discriminator.forward(g_xD)
-                    # [dims+window, batch] -> [batch]
+                    # [batch, dims+window] -> [batch]
                     d_xD = self.discriminator.forward(k_batch_x)
                     optimizer_D.zero_grad()
                     loss_D = criterion_D(d_xD, d_gxD)
                     loss_D.backward()
                     optimizer_D.step()
 
-                z_mG = torch.randn(1, self.cfg.batch_size, self.metadata_dim) # [1, batch, dims]
-                z_dG = torch.randn(self.window_size, self.cfg.batch_size, 1)  # [window, batch, 1]
-                # [dims, batch] -> [dims, batch]
-                g_mG = self.metadata_generator.forward(z_mG.squeeze().T)
-                # [window, batch, dims] + [window, batch, 1] = [window, batch, dims+1] -> [window, batch]
-                g_dG = self.data_generator.forward(torch.cat((z_mG.repeat(self.window_size, 1, 1),z_dG), dim=2)).squeeze()
-                # [dims, batch] + [window, batch] = [dims+window, batch]
-                g_xG = torch.cat((g_mG, g_dG), dim=0)
+                z_mG = torch.randn(self.cfg.batch_size, self.metadata_dim) # [batch, dims]
+                z_dG = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
+                # [batch, dims] -> [batch, dims]
+                g_mG = self.metadata_generator.forward(z_mG)
+                # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1] -> [batch, window]
+                g_dG = self.data_generator.forward(torch.cat((z_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2)), dim=2))[0].squeeze()
+                # [batch, dims] + [batch, window] = [batch, dims+window]
+                g_xG = torch.cat((g_mG, g_dG), dim=1)
 
-                with torch.no_grad():
-                    # [dims+window, batch] -> [batch]
-                    d_gxG = self.discriminator.forward(g_xG)
+                self.discriminator.train(False)
+                # [batch, dims+window] -> [batch]
+                d_gxG = self.discriminator.forward(g_xG)
                 optimizer_Gm.zero_grad()
                 optimizer_Gd.zero_grad()
-                loss_Gm = criterion_G(d_gxG)
-                loss_Gd = criterion_G(d_gxG)
-                loss_Gm.backward()
-                loss_Gd.backward()
+                loss_G = criterion_G(d_gxG)
+                loss_G.backward()
+
+                # Monitoring gradients
+                # gradient_magnitude_meta = 0
+                # for layer in self.metadata_generator:
+                #     if hasattr(layer, "weight"):
+                #        gradient_magnitude_meta += torch.norm(layer.weight.grad).item()
+                # gradient_magnitude_data = 0
+                # gradient_magnitude_data += torch.norm(self.data_generator.weight_ih_l0.grad).item()
+                # gradient_magnitude_data += torch.norm(self.data_generator.weight_hh_l0.grad).item()
+                # gradient_magnitude_data += torch.norm(self.data_generator.bias_ih_l0.grad).item()
+                # gradient_magnitude_data += torch.norm(self.data_generator.bias_hh_l0.grad).item()
+                # if b_idx % 10 == 0:
+                #     print(f"Gradient Magnitude Meta: {gradient_magnitude_meta}, Gradient Magnitude Data: {gradient_magnitude_data}")
+
                 optimizer_Gm.step()
                 optimizer_Gd.step()
+
+                epoch_loss_D.append(loss_D.item())
+                epoch_loss_G.append(loss_G.item())
 
             ## still need to setup train/test/val split before this can be used
             # if (epoch_n+1) % logging_steps == 0:
@@ -199,7 +219,7 @@ class SimpleGAN(torch.nn.Module):
                 scheduler_Gd.step()
                 scheduler_D.step()
             
-            pbar.set_description(f"Loss: {sum(epoch_loss)/len(epoch_loss)}")
+            pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.3}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.3}")
 
         writer.flush()
         writer.close()

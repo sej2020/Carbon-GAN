@@ -17,8 +17,10 @@ class CarbonDataset(Dataset):
     Attributes:
         region: The region from which the data is reported
         elec_source: The type of fuel/method for electricity generation
-        metadata: The metadata accompanying the emissions data: comprising time and weather data
-        data: The emissions data by region and electricity source
+        full_metadata: The metadata accompanying the emissions data: comprising time and weather data
+        metadata: The metadata accompanying the emissions data: comprising time and weather data, perhaps truncated
+        full_data: The emissions data by region and electricity source
+        data: The emissions data by region and electricity source, perhaps truncated
         metadata_scaler: The standard scaler object for the metadata
         data_scaler: The standard scaler object for the data
     """
@@ -37,8 +39,10 @@ class CarbonDataset(Dataset):
         metadata = self._preprocess_metadata(region)
         self.metadata_scaler = StandardScaler()
         self.data_scaler = StandardScaler()
-        self.metadata = torch.tensor(self.metadata_scaler.fit_transform(metadata))
-        self.data = torch.tensor(self.data_scaler.fit_transform(elec_source_data.reshape(-1, 1)))
+        self.full_metadata = torch.tensor(self.metadata_scaler.fit_transform(metadata), dtype=torch.float32)
+        self.full_data = torch.tensor(self.data_scaler.fit_transform(elec_source_data.reshape(-1, 1)), dtype=torch.float32)
+        self.metadata = self.full_metadata
+        self.data = self.full_data
 
 
     def _preprocess_metadata(self, region):
@@ -71,7 +75,7 @@ class CarbonDataset(Dataset):
         return self.metadata[idx], self.data[idx]
     
 
-    def roll(self, idx):
+    def _roll(self, idx):
         """
         Args:
             idx: The number of elements to remove from the front of the dataset
@@ -79,7 +83,16 @@ class CarbonDataset(Dataset):
         Returns:
             A new dataset with the first idx elements removed
         """
-        return self.metadata[idx:], self.data[idx:]
+        self.metadata = self.metadata[idx:]
+        self.data = self.data[idx:]
+
+
+    def _unroll(self):
+        """
+        Resets the meta data and data to their original (unrolled) state
+        """
+        self.metadata = self.full_metadata
+        self.data = self.full_data
     
     
 if __name__ == '__main__':
