@@ -39,7 +39,11 @@ class SimpleGAN(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(metadata_dim, metadata_dim)
         )
-        self.data_generator = torch.nn.RNN(metadata_dim+1, 1, nonlinearity='relu', batch_first=True)
+        self.data_generator = torch.nn.Sequential(
+            torch.nn.Linear(window_size, window_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(window_size, window_size)
+        )
         self.discriminator = torch.nn.Sequential(
             torch.nn.Linear(metadata_dim+window_size, 16),
             torch.nn.ReLU(),
@@ -147,8 +151,8 @@ class SimpleGAN(torch.nn.Module):
                     with torch.no_grad():
                         # [batch, dims] -> [batch, dims]
                         g_mD = self.metadata_generator.forward(z_mD)
-                        # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1] -> [batch, window]
-                        g_dD = self.data_generator.forward(torch.cat((z_mD.unsqueeze(1).repeat(1, self.window_size, 1), z_dD.unsqueeze(2)), dim=2))[0].squeeze()
+                        # [batch, window] -> [batch, window]
+                        g_dD = self.data_generator.forward(z_dD)
                         # [batch, dims] + [batch, window] = [batch, dims+window]
                         g_xD = torch.cat((g_mD, g_dD), dim=1)
                     # [batch, dims+window] -> [batch]
@@ -164,8 +168,8 @@ class SimpleGAN(torch.nn.Module):
                 z_dG = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
                 # [batch, dims] -> [batch, dims]
                 g_mG = self.metadata_generator.forward(z_mG)
-                # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1] -> [batch, window]
-                g_dG = self.data_generator.forward(torch.cat((z_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2)), dim=2))[0].squeeze()
+                # [batch, window] -> [batch, window]
+                g_dG = self.data_generator.forward(z_dG)
                 # [batch, dims] + [batch, window] = [batch, dims+window]
                 g_xG = torch.cat((g_mG, g_dG), dim=1)
 
@@ -183,12 +187,12 @@ class SimpleGAN(torch.nn.Module):
                 #     if hasattr(layer, "weight"):
                 #        gradient_magnitude_meta += torch.norm(layer.weight.grad).item()
                 # gradient_magnitude_data = 0
-                # gradient_magnitude_data += torch.norm(self.data_generator.weight_ih_l0.grad).item()
-                # gradient_magnitude_data += torch.norm(self.data_generator.weight_hh_l0.grad).item()
-                # gradient_magnitude_data += torch.norm(self.data_generator.bias_ih_l0.grad).item()
-                # gradient_magnitude_data += torch.norm(self.data_generator.bias_hh_l0.grad).item()
+                # for layer in self.data_generator:
+                #     if hasattr(layer, "weight"):
+                #         gradient_magnitude_data += torch.norm(layer.weight.grad).item()
                 # if b_idx % 10 == 0:
-                #     print(f"Gradient Magnitude Meta: {gradient_magnitude_meta}, Gradient Magnitude Data: {gradient_magnitude_data}")
+                #     print(f"G_m gradient magnitude: {gradient_magnitude_meta}, G_d gradient magnitude: {gradient_magnitude_data}")
+                #     time.sleep(0.2)
 
                 optimizer_Gm.step()
                 optimizer_Gd.step()
