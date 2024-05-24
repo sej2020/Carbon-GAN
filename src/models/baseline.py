@@ -8,7 +8,7 @@ from src.utils.data import CarbonDataset
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from joblib import dump
-import time
+# import time
 
 class SimpleGAN(torch.nn.Module):
     """
@@ -77,12 +77,12 @@ class SimpleGAN(torch.nn.Module):
         with open(f"{hp_path}/trainer_config.txt", "w") as file:
             file.write(str(self.cfg))
         
-        data = CarbonDataset(self.cfg.region, self.cfg.elec_source)
+        training_data = CarbonDataset(self.cfg.region, self.cfg.elec_source)
         # saving the fitted scalers
         scaler_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/scalers")
         scaler_path.mkdir(parents=True, exist_ok=True)
-        dump(data.metadata_scaler, scaler_path / "metadata_scaler.joblib")
-        dump(data.data_scaler, scaler_path / "data_scaler.joblib")
+        dump(training_data.metadata_scaler, scaler_path / "metadata_scaler.joblib")
+        dump(training_data.data_scaler, scaler_path / "data_scaler.joblib")
 
         optimizer_Gm = torch.optim.Adam(self.metadata_generator.parameters(), lr=self.cfg.lr)
         optimizer_Gd = torch.optim.Adam(self.data_generator.parameters(), lr=self.cfg.lr)
@@ -125,11 +125,11 @@ class SimpleGAN(torch.nn.Module):
             epoch_loss_D = []
             epoch_loss_G = []
             if epoch_n % self.window_size == 0:
-                data._unroll()
+                training_data._unroll()
             else:
-                data._roll(epoch_n % self.window_size)
+                training_data._roll(epoch_n % self.window_size)
             dataloader = DataLoader(
-                data, 
+                training_data, 
                 batch_size = (self.window_size + self.cfg.batch_size) * self.cfg.k, 
                 drop_last = True, shuffle = False
             )
@@ -181,18 +181,19 @@ class SimpleGAN(torch.nn.Module):
                 loss_G = criterion_G(d_gxG)
                 loss_G.backward()
 
-                # Monitoring gradients
-                # gradient_magnitude_meta = 0
-                # for layer in self.metadata_generator:
-                #     if hasattr(layer, "weight"):
-                #        gradient_magnitude_meta += torch.norm(layer.weight.grad).item()
-                # gradient_magnitude_data = 0
-                # for layer in self.data_generator:
-                #     if hasattr(layer, "weight"):
-                #         gradient_magnitude_data += torch.norm(layer.weight.grad).item()
-                # if b_idx % 10 == 0:
-                #     print(f"G_m gradient magnitude: {gradient_magnitude_meta}, G_d gradient magnitude: {gradient_magnitude_data}")
-                #     time.sleep(0.2)
+                if self.cfg.debug:
+                    if b_idx % 10 == 0:
+                        # print(f"Epoch: {epoch_n}, Batch: {b_idx}, Loss_D: {loss_D.item()}, Loss_G: {loss_G.item()}")
+                        # Monitoring gradients
+                        gradient_magnitude_meta = 0
+                        for layer in self.metadata_generator:
+                            if hasattr(layer, "weight"):
+                                gradient_magnitude_meta += torch.norm(layer.weight.grad).item()
+                        gradient_magnitude_data = 0
+                        for layer in self.data_generator:
+                            if hasattr(layer, "weight"):
+                                gradient_magnitude_data += torch.norm(layer.weight.grad).item()
+                        print(f"G_m gradient magnitude: {gradient_magnitude_meta}, G_d gradient magnitude: {gradient_magnitude_data}")
 
                 optimizer_Gm.step()
                 optimizer_Gd.step()
@@ -200,23 +201,28 @@ class SimpleGAN(torch.nn.Module):
                 epoch_loss_D.append(loss_D.item())
                 epoch_loss_G.append(loss_G.item())
 
-            ## still need to setup train/test/val split before this can be used
-            # if (epoch_n+1) % logging_steps == 0:
-            #     val_loss = self.evaluate(x_test, y_test, criterion, self.cfg.batch_size) # still need to setup train/test/val split
-            #     writer.add_scalars(
-            #         "Loss", 
-            #         {"Training" : sum(epoch_loss)/len(epoch_loss), "Validation": sum(val_loss)/len(val_loss)}, 
-            #         epoch_n
-            #         )
-            #     self.save_checkpoint({
-            #         "epoch": epoch_n,
-            #         "Gm_state_dict": self.metadata_generator.state_dict(),
-            #         "Gd_state_dict": self.data_generator.state_dict(),
-            #         "D_state_dict": self.discriminator.state_dict(),
-            #         "Gm_optim_state_dict": optimizer_Gm.state_dict(),
-            #         "Gd_optim_state_dict": optimizer_Gd.state_dict(),
-            #         "D_optim_state_dict": optimizer_D.state_dict()
-            #     })
+
+            if (epoch_n+1) % logging_steps == 0:
+                # eval_metrics = self.evaluate(...)
+                writer.add_scalars(
+                    "Training Loss", 
+                    {"Generator" : sum(epoch_loss_G)/len(epoch_loss_G), "Discriminator": sum(epoch_loss_D)/len(epoch_loss_D)}, 
+                    epoch_n
+                    )
+                # writer.add_scalars(
+                #     "Evaluation Metrics", 
+                #     {"Metric 1" : eval_metrics[0], "Metric 2": eval_metrics[1]}, 
+                #     epoch_n
+                #     )
+                self.save_checkpoint({
+                    "epoch": epoch_n,
+                    "Gm_state_dict": self.metadata_generator.state_dict(),
+                    "Gd_state_dict": self.data_generator.state_dict(),
+                    "D_state_dict": self.discriminator.state_dict(),
+                    "Gm_optim_state_dict": optimizer_Gm.state_dict(),
+                    "Gd_optim_state_dict": optimizer_Gd.state_dict(),
+                    "D_optim_state_dict": optimizer_D.state_dict()
+                })
 
             if self.cfg.lr_scheduler:
                 scheduler_Gm.step()

@@ -19,6 +19,7 @@ class GANTrainerConfig:
         logging_frequency = 0.1,
         resume_from_cpt = False,
         cpt_path = None,
+        debug = False
     ):
         """
         Configuration for training a simple GAN.
@@ -37,6 +38,7 @@ class GANTrainerConfig:
             logging_frequency: how often to evaluate the model on the test set, log the training metrics, and save the model 
             resume_from_cpt: Whether to resume training from a checkpoint
             cpt_path: The path to the checkpoint to resume training from
+            debug: Whether to run in debug mode
         """
         self.region = region
         self.elec_source = elec_source
@@ -54,6 +56,7 @@ class GANTrainerConfig:
         self.logging_frequency = logging_frequency
         self.resume_from_cpt = resume_from_cpt
         self.cpt_path = cpt_path
+        self.debug = debug
 
     def __str__(self):
         return f"""TrainerConfig(

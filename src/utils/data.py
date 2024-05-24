@@ -17,32 +17,68 @@ class CarbonDataset(Dataset):
     Attributes:
         region: The region from which the data is reported
         elec_source: The type of fuel/method for electricity generation
-        full_metadata: The metadata accompanying the emissions data: comprising time and weather data
-        metadata: The metadata accompanying the emissions data: comprising time and weather data, perhaps truncated
-        full_data: The emissions data by region and electricity source
-        data: The emissions data by region and electricity source, perhaps truncated
+        full_metadata_set: The training, validation, or test set metadata accompanying the emissions data
+        metadata: The metadata set accompanying the emissions data: comprising time and weather data, perhaps truncated
+        full_data_set: The training, validation, or test set emissions data by region and electricity source
+        data: The emissions dataset by region and electricity source, perhaps truncated
+        train_size: The proportion of data to be used in the training set
+        val_size: The proportion of data to be used in the validation set (remainder is the test set)
+        train_idx: The index of the dataset where the validation set ends
+        val_idx: The index of the dataset where the test set ends
         metadata_scaler: The standard scaler object for the metadata
         data_scaler: The standard scaler object for the data
     """
-    def __init__(self, region: str, elec_source: str):
+    def __init__(self, region: str, elec_source: str, train_size: float = 0.7, val_size: float = 0.15, mode: str = "train"):
         """
         Initializes the CarbonDataset class. Performs normalization on the metadata and data.
 
         Args:
             region: The region from which the data is reported
             elec_source: The type of fuel/method for electricity generation
+            train_size: The proportion of data to be used in the training set
+            val_size: The proportion of data to be used in the validation set (remainder is the test set)
+            mode: The mode of the dataset: either "train", "val", or "test"
+
         """
         self.region = region
         self.elec_source = elec_source
+        self.train_size = train_size
+        self.val_size = val_size
+        self.mode = mode
         full_data = pd.read_csv(f"data/{region}/{region}_2019_clean.csv")
+        self.train_idx = int(train_size * len(full_data))
+        self.val_idx = int((train_size + val_size) * len(full_data))
+        
+        assert train_size + val_size <= 1, "Train and validation sizes must sum to no greater than 1."
+
         elec_source_data = full_data[elec_source].values
         metadata = self._preprocess_metadata(region)
+
         self.metadata_scaler = StandardScaler()
         self.data_scaler = StandardScaler()
-        self.full_metadata = torch.tensor(self.metadata_scaler.fit_transform(metadata), dtype=torch.float32)
-        self.full_data = torch.tensor(self.data_scaler.fit_transform(elec_source_data.reshape(-1, 1)), dtype=torch.float32)
-        self.metadata = self.full_metadata
-        self.data = self.full_data
+        self.metadata_scaler.fit(metadata[:self.train_idx])
+        self.data_scaler.fit(elec_source_data[:self.train_idx].reshape(-1, 1))
+
+        metadata = self.metadata_scaler.transform(metadata)
+        elec_source_data = self.data_scaler.transform(elec_source_data.reshape(-1, 1))
+
+
+        if mode == "train":
+            elec_source_data = elec_source_data[:self.train_idx]
+            metadata = metadata[:self.train_idx]
+        elif mode == "val":
+            elec_source_data = elec_source_data[self.train_idx:self.val_idx]
+            metadata = metadata[self.train_idx:self.val_idx]
+        elif mode == "test":
+            elec_source_data = elec_source_data[self.val_idx:]
+            metadata = metadata[self.val_idx:]
+        else:
+            raise ValueError("Mode must be one of 'train', 'val', or 'test'.")
+        
+        self.full_metadata_set = torch.tensor(metadata, dtype=torch.float32)
+        self.full_data_set = torch.tensor(elec_source_data, dtype=torch.float32)
+        self.metadata = self.full_metadata_set
+        self.data = self.full_data_set
 
 
     def _preprocess_metadata(self, region):
@@ -91,8 +127,8 @@ class CarbonDataset(Dataset):
         """
         Resets the meta data and data to their original (unrolled) state
         """
-        self.metadata = self.full_metadata
-        self.data = self.full_data
+        self.metadata = self.full_metadata_set
+        self.data = self.full_data_set
     
     
 if __name__ == '__main__':

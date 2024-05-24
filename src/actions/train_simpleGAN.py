@@ -78,6 +78,7 @@ config = GANTrainerConfig(
     logging_frequency=args.logging_frequency,
     resume_from_cpt=args.resume_from_cpt,
     cpt_path=args.cpt_path,
+    debug=args.debug
 )
 
 GAN.train(config)
