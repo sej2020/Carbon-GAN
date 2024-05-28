@@ -25,13 +25,14 @@ class SimpleGAN(torch.nn.Module):
         (Established in methods):
         cfg: configuration for training
     """
-    def __init__(self, metadata_dim: int, window_size: int):
+    def __init__(self, metadata_dim: int, window_size: int, cpt_path: str = None):
         """
         Initializes Simple GAN model.
 
         Args:
             metadata_dim: The dimension of the metadata
             window_size: The size of the historical data used for the RNN generator
+            cpt_path: path to a checkpoint file to use for weights initialization. If None, weights are initialized randomly.
         """
         super().__init__()
         self.metadata_generator = torch.nn.Sequential(
@@ -40,18 +41,29 @@ class SimpleGAN(torch.nn.Module):
             torch.nn.Linear(metadata_dim, metadata_dim)
         )
         self.data_generator = torch.nn.Sequential(
-            torch.nn.Linear(window_size, window_size),
+            torch.nn.Linear(metadata_dim + window_size, 16),
             torch.nn.ReLU(),
-            torch.nn.Linear(window_size, window_size)
+            torch.nn.Linear(16, window_size)
         )
         self.discriminator = torch.nn.Sequential(
-            torch.nn.Linear(metadata_dim+window_size, 16),
+            torch.nn.Linear(metadata_dim + window_size, 16),
             torch.nn.ReLU(),
             torch.nn.Linear(16, 1),
             torch.nn.Sigmoid()
         )
         self.metadata_dim = metadata_dim
         self.window_size = window_size
+
+        if cpt_path:
+            self.checkpoint_dict = torch.load(cpt_path)
+            metadata_generator_dict = self.checkpoint_dict['Gm_state_dict']
+            data_generator_dict = self.checkpoint_dict['Gd_state_dict']
+            discriminator_dict = self.checkpoint_dict['D_state_dict']
+
+            self.metadata_generator.load_state_dict(metadata_generator_dict)
+            self.data_generator.load_state_dict(data_generator_dict)
+            self.discriminator.load_state_dict(discriminator_dict)
+
     
 
     def train(self, cfg):
@@ -151,8 +163,10 @@ class SimpleGAN(torch.nn.Module):
                     with torch.no_grad():
                         # [batch, dims] -> [batch, dims]
                         g_mD = self.metadata_generator.forward(z_mD)
-                        # [batch, window] -> [batch, window]
-                        g_dD = self.data_generator.forward(z_dD)
+                        # [batch, dims] + [batch, window] = [batch, dims+window]
+                        gz_xD = torch.cat((g_mD, z_dD), dim=1)
+                        # [batch, dims+window] -> [batch, window]
+                        g_dD = self.data_generator.forward(gz_xD)
                         # [batch, dims] + [batch, window] = [batch, dims+window]
                         g_xD = torch.cat((g_mD, g_dD), dim=1)
                     # [batch, dims+window] -> [batch]
@@ -168,8 +182,10 @@ class SimpleGAN(torch.nn.Module):
                 z_dG = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
                 # [batch, dims] -> [batch, dims]
                 g_mG = self.metadata_generator.forward(z_mG)
-                # [batch, window] -> [batch, window]
-                g_dG = self.data_generator.forward(z_dG)
+                # [batch, dims] + [batch, window] = [batch, dims+window]
+                gz_xG = torch.cat((g_mG, z_dG), dim=1)
+                # [batch, dims+window] -> [batch, window]
+                g_dG = self.data_generator.forward(gz_xG)
                 # [batch, dims] + [batch, window] = [batch, dims+window]
                 g_xG = torch.cat((g_mG, g_dG), dim=1)
 
@@ -233,6 +249,51 @@ class SimpleGAN(torch.nn.Module):
 
         writer.flush()
         writer.close()
+
+
+    def generate(self, n_samples: int = 1, conditional_metadata: torch.Tensor = None, conditional_data: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Generates data samples from the generator.
+
+        Args:
+            n_samples: number of data sequences to generate
+            conditional_metadata: metadata tensor to condition the generator on of shape [1, metadata_dim] or [n_samples, metadata_dim]
+            conditional_data: data tensor to condition the generator on of shape [1, 1...window_size] or [n_samples, 1...window_size]
+
+        Returns:
+            a tuple containing the generated metadata and data tensors
+        """
+        self.metadata_generator.train(False)
+        self.data_generator.train(False)
+        self.discriminator.train(False)
+        
+        z_mG = torch.randn(n_samples, self.metadata_dim) # [batch, dims]
+        z_dG = torch.randn(n_samples, self.window_size)  # [batch, window]
+        
+        if conditional_metadata is not None:
+            assert conditional_metadata.shape[0] in [n_samples, 1], "Conditional metadata tensor must have dimension 0 equal to n_samples or 1"
+            assert conditional_metadata.shape[1] == self.metadata_dim, "Conditional metadata tensor must have the dimension 1 equal to the model's metadata dimension" 
+            if conditional_metadata.shape[0] == 1:
+                g_mG = conditional_metadata.repeat(n_samples, 1)
+            else:
+                g_mG = conditional_metadata
+        else:
+            # [batch, dims] -> [batch, dims]
+            g_mG = self.metadata_generator.forward(z_mG)
+        
+        if conditional_data is not None:
+            assert conditional_data.shape[0] in [n_samples, 1], "Conditional data tensor must have dimension 0 equal to n_samples or 1"
+            assert conditional_data.shape[1] <= self.window_size, "Conditional data tensor must have the dimension 1 less than or equal to the model's window size"
+            if conditional_data.shape[0] == 1:
+                conditional_data = conditional_data.repeat(n_samples, 1)
+            z_dG[:, -conditional_data.shape[1]:] = conditional_data
+
+        # [batch, dims] + [batch, window] = [batch, dims+window]
+        gz_xG = torch.cat((g_mG, z_dG), dim=1)
+        # [batch, dims+window] -> [batch, window]
+        g_dG = self.data_generator.forward(gz_xG)
+
+        return g_mG, g_dG
 
 
     def save_checkpoint(self, checkpoint_dict: dict):
