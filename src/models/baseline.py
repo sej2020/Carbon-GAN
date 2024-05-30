@@ -7,8 +7,9 @@ import tqdm
 from src.utils.data import CarbonDataset
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from joblib import dump
-# import time
+from joblib import dump, load
+
+torch.set_printoptions(sci_mode=False)
 
 class SimpleGAN(torch.nn.Module):
     """
@@ -21,6 +22,8 @@ class SimpleGAN(torch.nn.Module):
         discriminator: An MLP discriminator
         metadata_dim: The dimension of the metadata
         window_size: The size of the historical data used for the RNN generator
+        metadata_scaler: The standard scaler object for the metadata
+        data_scaler: The standard scaler object for the data
     ------------
         (Established in methods):
         cfg: configuration for training
@@ -30,9 +33,11 @@ class SimpleGAN(torch.nn.Module):
         Initializes Simple GAN model.
 
         Args:
-            metadata_dim: The dimension of the metadata
-            window_size: The size of the historical data used for the RNN generator
+            metadata_dim: The dimension of the metadata. Using the CarbonDataset class, this is 8
+            window_size: The size of the historical data used for the data generator
             cpt_path: path to a checkpoint file to use for weights initialization. If None, weights are initialized randomly.
+                scalers must be in a folder called 'scalers' in the same directory as the folder 'checkpoints' containing the 
+                checkpoint file
         """
         super().__init__()
         self.metadata_generator = torch.nn.Sequential(
@@ -64,6 +69,8 @@ class SimpleGAN(torch.nn.Module):
             self.data_generator.load_state_dict(data_generator_dict)
             self.discriminator.load_state_dict(discriminator_dict)
 
+            self.metadata_scaler = load(f"{pathlib.Path(cpt_path).parent.parent}/scalers/metadata_scaler.joblib")
+            self.data_scaler = load(f"{pathlib.Path(cpt_path).parent.parent}/scalers/data_scaler.joblib")
     
 
     def train(self, cfg):
@@ -95,6 +102,8 @@ class SimpleGAN(torch.nn.Module):
         scaler_path.mkdir(parents=True, exist_ok=True)
         dump(training_data.metadata_scaler, scaler_path / "metadata_scaler.joblib")
         dump(training_data.data_scaler, scaler_path / "data_scaler.joblib")
+        self.metadata_scaler = training_data.metadata_scaler
+        self.data_scaler = training_data.data_scaler
 
         optimizer_Gm = torch.optim.Adam(self.metadata_generator.parameters(), lr=self.cfg.lr)
         optimizer_Gd = torch.optim.Adam(self.data_generator.parameters(), lr=self.cfg.lr)
@@ -251,12 +260,13 @@ class SimpleGAN(torch.nn.Module):
         writer.close()
 
 
-    def generate(self, n_samples: int = 1, conditional_metadata: torch.Tensor = None, conditional_data: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, n_samples: int = 1, og_scale: bool = True, conditional_metadata: torch.Tensor = None, conditional_data: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Generates data samples from the generator.
 
         Args:
             n_samples: number of data sequences to generate
+            og_scale: whether to return the data on its original scale. If False, the data is returned in its scaled form
             conditional_metadata: metadata tensor to condition the generator on of shape [1, metadata_dim] or [n_samples, metadata_dim]
             conditional_data: data tensor to condition the generator on of shape [1, 1...window_size] or [n_samples, 1...window_size]
 
@@ -293,7 +303,12 @@ class SimpleGAN(torch.nn.Module):
         # [batch, dims+window] -> [batch, window]
         g_dG = self.data_generator.forward(gz_xG)
 
-        return g_mG, g_dG
+        if og_scale:
+            og_scale_gmG = torch.tensor(self.metadata_scaler.inverse_transform(g_mG.detach().numpy()))
+            og_scale_gdG = torch.tensor(self.data_scaler.inverse_transform(g_dG.detach().numpy()))
+            return og_scale_gmG, og_scale_gdG
+        else:
+            return g_mG, g_dG
 
 
     def save_checkpoint(self, checkpoint_dict: dict):
@@ -309,3 +324,9 @@ class SimpleGAN(torch.nn.Module):
             checkpoint_dict,
             checkpoint_path / f"checkpt_e{checkpoint_dict['epoch']}.pt",
         )
+
+if __name__ == "__main__":
+    gan = SimpleGAN(8, 24, cpt_path="")
+    m,d = gan.generate(n_samples=1)
+    print(m)
+    print(d)

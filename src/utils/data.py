@@ -8,6 +8,7 @@ Typical usage example:
 ```
 """
 import torch
+import random
 from torch.utils.data import Dataset
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -28,28 +29,23 @@ class CarbonDataset(Dataset):
         metadata_scaler: The standard scaler object for the metadata
         data_scaler: The standard scaler object for the data
     """
-    def __init__(self, region: str, elec_source: str, train_size: float = 0.7, val_size: float = 0.15, mode: str = "train"):
+    def __init__(self, region: str, elec_source: str, train_size: float = 0.7, mode: str = "train"):
         """
         Initializes the CarbonDataset class. Performs normalization on the metadata and data.
 
         Args:
             region: The region from which the data is reported
             elec_source: The type of fuel/method for electricity generation
-            train_size: The proportion of data to be used in the training set
-            val_size: The proportion of data to be used in the validation set (remainder is the test set)
-            mode: The mode of the dataset: either "train", "val", or "test"
+            train_size: The proportion of data to be used in the training set (remainder is the test set)
+            mode: The mode of the dataset: either "train", "test"
 
         """
         self.region = region
         self.elec_source = elec_source
         self.train_size = train_size
-        self.val_size = val_size
         self.mode = mode
         full_data = pd.read_csv(f"data/{region}/{region}_2019_clean.csv")
         self.train_idx = int(train_size * len(full_data))
-        self.val_idx = int((train_size + val_size) * len(full_data))
-        
-        assert train_size + val_size <= 1, "Train and validation sizes must sum to no greater than 1."
 
         elec_source_data = full_data[elec_source].values
         metadata = self._preprocess_metadata(region)
@@ -66,14 +62,11 @@ class CarbonDataset(Dataset):
         if mode == "train":
             elec_source_data = elec_source_data[:self.train_idx]
             metadata = metadata[:self.train_idx]
-        elif mode == "val":
-            elec_source_data = elec_source_data[self.train_idx:self.val_idx]
-            metadata = metadata[self.train_idx:self.val_idx]
         elif mode == "test":
-            elec_source_data = elec_source_data[self.val_idx:]
-            metadata = metadata[self.val_idx:]
+            elec_source_data = elec_source_data[self.train_idx:]
+            metadata = metadata[self.train_idx:]
         else:
-            raise ValueError("Mode must be one of 'train', 'val', or 'test'.")
+            raise ValueError("Mode must be one of 'train', or 'test'.")
         
         self.full_metadata_set = torch.tensor(metadata, dtype=torch.float32)
         self.full_data_set = torch.tensor(elec_source_data, dtype=torch.float32)
@@ -94,11 +87,10 @@ class CarbonDataset(Dataset):
         weather_data = pd.read_csv(f"data/{region}/{region}_aggregated_weather_data.csv")
         weather_data["day"] = weather_data["datetime"].apply(lambda x: int(x.split(" ")[0].split("-")[2]))
         weather_data["month"] = weather_data["datetime"].apply(lambda x: int(x.split(" ")[0].split("-")[1]))
-        weather_data["year"] = weather_data["datetime"].apply(lambda x: int(x.split(" ")[0].split("-")[0])-2019)
         weather_data["hour"] = weather_data["datetime"].apply(lambda x: int(x.split(" ")[1].split(":")[0]))
         weather_data.drop(columns=["datetime"], inplace=True)
         wd_cols = weather_data.columns.to_list()
-        wd_cols = wd_cols[-4:] + wd_cols[:-4]
+        wd_cols = wd_cols[-3:] + wd_cols[:-3]
         weather_data = weather_data[wd_cols]
         return weather_data.values
         
@@ -129,7 +121,7 @@ class CarbonDataset(Dataset):
         """
         self.metadata = self.full_metadata_set
         self.data = self.full_data_set
-    
+
     
 if __name__ == '__main__':
     AUS_QLD_dataset_solar = CarbonDataset("AUS_QLD", "solar")

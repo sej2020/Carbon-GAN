@@ -45,7 +45,7 @@ parser.add_argument("--resume_from_cpt", type=argparse.BooleanOptionalAction, de
 parser.add_argument("--cpt_path", type=str, default=None)
 
 # Initializing models
-parser.add_argument("--metadata_dim", type=int, default=9, help="Dimension of the metadata: if using provided dataset, this is 9.")
+parser.add_argument("--metadata_dim", type=int, default=8, help="Dimension of the metadata: if using provided dataset, this is 8.")
 parser.add_argument("--window_size", type=int, default=24, help="Size of historical data window for training and generation")
 
 args = parser.parse_args()
@@ -60,7 +60,7 @@ if args.debug:
     NAME = 'debug'
     LOGGING_DIR = f"logs/debug"
 else:
-    LOGGING_DIR = f"logs/{args.run_name}"
+    LOGGING_DIR = f"logs/{NAME}"
 
 GAN = SimpleGAN(metadata_dim=args.metadata_dim, window_size=args.window_size)
 
