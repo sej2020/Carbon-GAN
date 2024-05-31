@@ -13,15 +13,15 @@ torch.set_printoptions(sci_mode=False)
 
 class SimpleGAN(torch.nn.Module):
     """
-    Simple GAN comprising and MLP generator, an RNN generator, and an MLP discriminator. This model is intended to be used as a 
+    Simple GAN comprising and MLP generator, an LSTM generator, and an MLP discriminator. This model is intended to be used as a 
         baseline with which future models can be compared.
     
     Attributes:
         metadata_generator: An MLP rmetadata generator
-        data_generator: An RNN data generator
+        data_generator: An LSTM data generator
         discriminator: An MLP discriminator
         metadata_dim: The dimension of the metadata
-        window_size: The size of the historical data used for the RNN generator
+        window_size: The size of the historical data used for the LSTM generator
         metadata_scaler: The standard scaler object for the metadata
         data_scaler: The standard scaler object for the data
     ------------
@@ -45,11 +45,7 @@ class SimpleGAN(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Linear(metadata_dim, metadata_dim)
         )
-        self.data_generator = torch.nn.Sequential(
-            torch.nn.Linear(metadata_dim + window_size, 16),
-            torch.nn.ReLU(),
-            torch.nn.Linear(16, window_size)
-        )
+        self.data_generator = torch.nn.LSTM(metadata_dim + 1, hidden_size=1, nonlinearity='relu', batch_first=True)
         self.discriminator = torch.nn.Sequential(
             torch.nn.Linear(metadata_dim + window_size, 16),
             torch.nn.ReLU(),
@@ -85,7 +81,7 @@ class SimpleGAN(torch.nn.Module):
             cfg: configuration for training
         """
         # Notes on variable naming scheme:
-        # z: noise, m: relevant to metadata, d: relevant to data, x: metadata+data
+        # z: noise, m: relevant to metadata, d: relevant to data, x: metadata + data
         # g: passed through generator, d: passed through discriminator
         # G: relevant to training generator, D: relevant to training discriminator
         self.cfg = cfg
@@ -172,10 +168,10 @@ class SimpleGAN(torch.nn.Module):
                     with torch.no_grad():
                         # [batch, dims] -> [batch, dims]
                         g_mD = self.metadata_generator.forward(z_mD)
-                        # [batch, dims] + [batch, window] = [batch, dims+window]
-                        gz_xD = torch.cat((g_mD, z_dD), dim=1)
-                        # [batch, dims+window] -> [batch, window]
-                        g_dD = self.data_generator.forward(gz_xD)
+                        # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1]
+                        gz_xD = torch.cat(g_mD.unsqueeze(1).repeat(1, self.window_size, 1), z_dD.unsqueeze(2), dim=2)
+                        # [batch, window, dims+1] -> [batch, window]
+                        g_dD = self.data_generator.forward(gz_xD)[0].squeeze()
                         # [batch, dims] + [batch, window] = [batch, dims+window]
                         g_xD = torch.cat((g_mD, g_dD), dim=1)
                     # [batch, dims+window] -> [batch]
@@ -191,10 +187,10 @@ class SimpleGAN(torch.nn.Module):
                 z_dG = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
                 # [batch, dims] -> [batch, dims]
                 g_mG = self.metadata_generator.forward(z_mG)
-                # [batch, dims] + [batch, window] = [batch, dims+window]
-                gz_xG = torch.cat((g_mG, z_dG), dim=1)
-                # [batch, dims+window] -> [batch, window]
-                g_dG = self.data_generator.forward(gz_xG)
+                # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1]
+                gz_xG = torch.cat(g_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2), dim=2)
+                # [batch, window, dims+1] -> [batch, window]
+                g_dG = self.data_generator.forward(gz_xG)[0].squeeze()
                 # [batch, dims] + [batch, window] = [batch, dims+window]
                 g_xG = torch.cat((g_mG, g_dG), dim=1)
 
