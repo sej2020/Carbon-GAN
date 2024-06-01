@@ -35,8 +35,10 @@ parser.add_argument("--elec_source", type=str,
     ])
 parser.add_argument("--n_epochs", type=int, required=True)
 parser.add_argument("--batch_size", type=int, required=True)
-parser.add_argument("--lr", type=float, default=0.001)
-parser.add_argument("--k", type=int, default=4, help="Number of times to train the discriminator for each generator training step")
+parser.add_argument("--lr_Gm", type=float, default=0.001)
+parser.add_argument("--lr_Gd", type=float, default=0.001)
+parser.add_argument("--lr_D", type=float, default=0.001)
+parser.add_argument("--k", type=int, default=1, help="Number of times to train the discriminator for each generator training step")
 parser.add_argument("--run_name", type=str, default=None)
 parser.add_argument("--lr_scheduler", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=False)
@@ -54,10 +56,9 @@ if args.run_name:
     NAME = args.run_name
 else:
     # may need to replace with different scheme if I end up doing hyperparameter tuning using this script
-    NAME = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    NAME = f"{args.region}-{args.elec_source}-{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
 if args.debug:
-    NAME = 'debug'
     LOGGING_DIR = f"logs/debug"
 else:
     LOGGING_DIR = f"logs/{NAME}"
@@ -69,9 +70,11 @@ config = GANTrainerConfig(
     elec_source=args.elec_source,
     n_epochs=args.n_epochs,
     batch_size=args.batch_size,
-    lr=args.lr,
+    lr_Gm=args.lr_Gm,
+    lr_Gd=args.lr_Gd,
+    lr_D=args.lr_D,
     k=args.k,
-    run_name=args.run_name,
+    run_name=NAME,
     lr_scheduler=args.lr_scheduler,
     disable_tqdm=args.disable_tqdm,
     logging_dir=LOGGING_DIR,

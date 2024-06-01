@@ -14,7 +14,7 @@ torch.set_printoptions(sci_mode=False)
 class SimpleGAN(torch.nn.Module):
     """
     Simple GAN comprising and MLP generator, an LSTM generator, and an MLP discriminator. This model is intended to be used as a 
-        baseline with which future models can be compared.
+    baseline with which future models can be compared.
     
     Attributes:
         metadata_generator: An MLP rmetadata generator
@@ -41,19 +41,21 @@ class SimpleGAN(torch.nn.Module):
         """
         super().__init__()
         self.metadata_generator = torch.nn.Sequential(
-            torch.nn.Linear(metadata_dim, metadata_dim),
+            torch.nn.Linear(metadata_dim, metadata_dim, dtype=torch.float64),
             torch.nn.ReLU(),
-            torch.nn.Linear(metadata_dim, metadata_dim)
+            torch.nn.Linear(metadata_dim, metadata_dim, dtype=torch.float64)
         )
-        self.data_generator = torch.nn.LSTM(metadata_dim + 1, hidden_size=1, nonlinearity='relu', batch_first=True)
+        self.data_generator = torch.nn.LSTM(metadata_dim + 1, hidden_size=1, batch_first=True, dtype=torch.float64)
         self.discriminator = torch.nn.Sequential(
-            torch.nn.Linear(metadata_dim + window_size, 16),
+            torch.nn.Linear(metadata_dim + window_size, 8, dtype=torch.float64),
             torch.nn.ReLU(),
-            torch.nn.Linear(16, 1),
+            torch.nn.Linear(8, 1, dtype=torch.float64),
             torch.nn.Sigmoid()
         )
         self.metadata_dim = metadata_dim
         self.window_size = window_size
+        self.metadata_scaler = None
+        self.data_scaler = None
 
         if cpt_path:
             self.checkpoint_dict = torch.load(cpt_path)
@@ -101,9 +103,9 @@ class SimpleGAN(torch.nn.Module):
         self.metadata_scaler = training_data.metadata_scaler
         self.data_scaler = training_data.data_scaler
 
-        optimizer_Gm = torch.optim.Adam(self.metadata_generator.parameters(), lr=self.cfg.lr)
-        optimizer_Gd = torch.optim.Adam(self.data_generator.parameters(), lr=self.cfg.lr)
-        optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.cfg.lr)
+        optimizer_Gm = torch.optim.Adam(self.metadata_generator.parameters(), lr=self.cfg.lr_Gm)
+        optimizer_Gd = torch.optim.Adam(self.data_generator.parameters(), lr=self.cfg.lr_Gd)
+        optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.cfg.lr_D)
         criterion_D = lambda d_xD, d_gxD: -torch.mean(torch.log(d_xD) + torch.log(1 - d_gxD))
         criterion_G = lambda d_gxG: -torch.mean(torch.log(d_gxG))
 
@@ -163,13 +165,13 @@ class SimpleGAN(torch.nn.Module):
 
                     k_batch_x = torch.cat((k_batch_m, k_batch_d), dim=1) # [batch, dims+window]
 
-                    z_mD = torch.randn(self.cfg.batch_size, self.metadata_dim) # [batch, dims]
-                    z_dD = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
+                    z_mD = torch.randn(self.cfg.batch_size, self.metadata_dim, dtype=torch.float64) # [batch, dims]
+                    z_dD = torch.randn(self.cfg.batch_size, self.window_size, dtype=torch.float64)  # [batch, window]
                     with torch.no_grad():
                         # [batch, dims] -> [batch, dims]
                         g_mD = self.metadata_generator.forward(z_mD)
                         # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1]
-                        gz_xD = torch.cat(g_mD.unsqueeze(1).repeat(1, self.window_size, 1), z_dD.unsqueeze(2), dim=2)
+                        gz_xD = torch.cat((g_mD.unsqueeze(1).repeat(1, self.window_size, 1), z_dD.unsqueeze(2)), dim=2)
                         # [batch, window, dims+1] -> [batch, window]
                         g_dD = self.data_generator.forward(gz_xD)[0].squeeze()
                         # [batch, dims] + [batch, window] = [batch, dims+window]
@@ -183,12 +185,12 @@ class SimpleGAN(torch.nn.Module):
                     loss_D.backward()
                     optimizer_D.step()
 
-                z_mG = torch.randn(self.cfg.batch_size, self.metadata_dim) # [batch, dims]
-                z_dG = torch.randn(self.cfg.batch_size, self.window_size)  # [batch, window]
+                z_mG = torch.randn(self.cfg.batch_size, self.metadata_dim, dtype=torch.float64) # [batch, dims]
+                z_dG = torch.randn(self.cfg.batch_size, self.window_size, dtype=torch.float64)  # [batch, window]
                 # [batch, dims] -> [batch, dims]
                 g_mG = self.metadata_generator.forward(z_mG)
                 # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1]
-                gz_xG = torch.cat(g_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2), dim=2)
+                gz_xG = torch.cat((g_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2)), dim=2)
                 # [batch, window, dims+1] -> [batch, window]
                 g_dG = self.data_generator.forward(gz_xG)[0].squeeze()
                 # [batch, dims] + [batch, window] = [batch, dims+window]
@@ -203,18 +205,19 @@ class SimpleGAN(torch.nn.Module):
                 loss_G.backward()
 
                 if self.cfg.debug:
-                    if b_idx % 10 == 0:
-                        # print(f"Epoch: {epoch_n}, Batch: {b_idx}, Loss_D: {loss_D.item()}, Loss_G: {loss_G.item()}")
+                    if b_idx % 40 == 0:
                         # Monitoring gradients
                         gradient_magnitude_meta = 0
                         for layer in self.metadata_generator:
                             if hasattr(layer, "weight"):
                                 gradient_magnitude_meta += torch.norm(layer.weight.grad).item()
                         gradient_magnitude_data = 0
-                        for layer in self.data_generator:
-                            if hasattr(layer, "weight"):
-                                gradient_magnitude_data += torch.norm(layer.weight.grad).item()
-                        print(f"G_m gradient magnitude: {gradient_magnitude_meta}, G_d gradient magnitude: {gradient_magnitude_data}")
+                        for weight in self.data_generator.all_weights[0]:
+                            gradient_magnitude_data += torch.norm(weight.grad).item()
+                        if torch.isnan(torch.tensor(gradient_magnitude_meta)) or torch.isnan(torch.tensor(gradient_magnitude_data)):
+                            breakpoint()
+                        else:
+                            print(f"Ep {epoch_n}.{b_idx}: Loss_D = {loss_D.item():.3}, Loss_G = {loss_G.item():.3}, G_m grad mag = {gradient_magnitude_meta:.3}, G_d grad mag = {gradient_magnitude_data:.3}")
 
                 optimizer_Gm.step()
                 optimizer_Gd.step()
@@ -269,12 +272,14 @@ class SimpleGAN(torch.nn.Module):
         Returns:
             a tuple containing the generated metadata and data tensors
         """
+        assert self.metadata_scaler is not None, "Model must be trained before generating data. Please train or initialize weights with a cpt file."
+
         self.metadata_generator.train(False)
         self.data_generator.train(False)
         self.discriminator.train(False)
         
-        z_mG = torch.randn(n_samples, self.metadata_dim) # [batch, dims]
-        z_dG = torch.randn(n_samples, self.window_size)  # [batch, window]
+        z_mG = torch.randn(n_samples, self.metadata_dim, dtype=torch.float64) # [batch, dims]
+        z_dG = torch.randn(n_samples, self.window_size, dtype=torch.float64)  # [batch, window]
         
         if conditional_metadata is not None:
             assert conditional_metadata.shape[0] in [n_samples, 1], "Conditional metadata tensor must have dimension 0 equal to n_samples or 1"
@@ -294,10 +299,10 @@ class SimpleGAN(torch.nn.Module):
                 conditional_data = conditional_data.repeat(n_samples, 1)
             z_dG[:, -conditional_data.shape[1]:] = conditional_data
 
-        # [batch, dims] + [batch, window] = [batch, dims+window]
-        gz_xG = torch.cat((g_mG, z_dG), dim=1)
-        # [batch, dims+window] -> [batch, window]
-        g_dG = self.data_generator.forward(gz_xG)
+        # [batch, window, dims] + [batch, window, 1] = [batch, window, dims+1]
+        gz_xG = torch.cat((g_mG.unsqueeze(1).repeat(1, self.window_size, 1), z_dG.unsqueeze(2)), dim=2)
+        # [batch, window, dims+1] -> [batch, window]
+        g_dG = self.data_generator.forward(gz_xG)[0].squeeze(2)
 
         if og_scale:
             og_scale_gmG = torch.tensor(self.metadata_scaler.inverse_transform(g_mG.detach().numpy()))
@@ -322,7 +327,10 @@ class SimpleGAN(torch.nn.Module):
         )
 
 if __name__ == "__main__":
-    gan = SimpleGAN(8, 24, cpt_path="")
+    gan = SimpleGAN(8, 24, cpt_path="logs/debug/2024-05-31_12-20-57/checkpoints/checkpt_e399.pt")
+    print(gan.data_scaler.mean_)
+    print(gan.data_scaler.scale_)
+
     m,d = gan.generate(n_samples=1)
     print(m)
     print(d)
