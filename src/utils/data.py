@@ -22,15 +22,15 @@ class CarbonDataset(Dataset):
         mode: The mode of the dataset: either "train", "test"
         train_idx: The index of the dataset where the train set ends
         metadata_scaler: The standard scaler object for the metadata
-        data_scaler: The standard scaler object for the data
+        seq_scaler: The standard scaler object for the sequential data
         full_metadata_set: The training or test set metadata accompanying the emissions data
         metadata: The metadata set accompanying the emissions data: comprising time and weather data, perhaps truncated
-        full_data_set: The training or test set emissions data by region and electricity source
-        data: The emissions dataset by region and electricity source, perhaps truncated
+        full_seq_set: The training or test set emissions data by region and electricity source
+        seq_data: The emissions dataset by region and electricity source, perhaps truncated
     """
     def __init__(self, region: str, elec_source: str, train_size: float = 0.7, mode: str = "train"):
         """
-        Initializes the CarbonDataset class. Performs normalization on the metadata and data.
+        Initializes the CarbonDataset class. Performs normalization on the metadata and sequential data.
 
         Args:
             region: The region from which the data is reported
@@ -49,13 +49,12 @@ class CarbonDataset(Dataset):
         metadata = self._preprocess_metadata(region)
 
         self.metadata_scaler = StandardScaler()
-        self.data_scaler = StandardScaler()
+        self.seq_scaler = StandardScaler()
         self.metadata_scaler.fit(metadata[:self.train_idx])
-        self.data_scaler.fit(elec_source_data[:self.train_idx].reshape(-1, 1))
+        self.seq_scaler.fit(elec_source_data[:self.train_idx].reshape(-1, 1))
 
         metadata = self.metadata_scaler.transform(metadata)
-        elec_source_data = self.data_scaler.transform(elec_source_data.reshape(-1, 1))
-
+        elec_source_data = self.seq_scaler.transform(elec_source_data.reshape(-1, 1))
 
         if mode == "train":
             elec_source_data = elec_source_data[:self.train_idx]
@@ -66,10 +65,10 @@ class CarbonDataset(Dataset):
         else:
             raise ValueError("Mode must be one of 'train', or 'test'.")
         
-        self.full_metadata_set = torch.tensor(metadata, dtype=torch.float64)
-        self.full_data_set = torch.tensor(elec_source_data, dtype=torch.float64)
+        self.full_metadata_set = torch.tensor(metadata, dtype=torch.float32)
+        self.full_seq_set = torch.tensor(elec_source_data, dtype=torch.float32)
         self.metadata = self.full_metadata_set
-        self.data = self.full_data_set
+        self.seq_data = self.full_seq_set
 
 
     def _preprocess_metadata(self, region: str)-> np.ndarray:
@@ -94,12 +93,12 @@ class CarbonDataset(Dataset):
         
 
     def __len__(self):
-        return len(self.data)
+        return len(self.seq_data)
 
 
-    def __getitem__(self, idx):
-        return self.metadata[idx], self.data[idx]
-    
+    def __getitem__(self, key):
+        return self.metadata[key], self.seq_data[key]
+
 
     def _roll(self, idx: int):
         """
@@ -109,17 +108,17 @@ class CarbonDataset(Dataset):
             idx: The number of elements to remove from the front of the dataset
         """
         self.metadata = self.metadata[idx:]
-        self.data = self.data[idx:]
+        self.seq_data = self.seq_data[idx:]
 
 
     def _unroll(self):
         """
-        Resets the meta data and data to their original (unrolled) state
+        Resets the meta data and sequential data to their original (unrolled) state
         """
         self.metadata = self.full_metadata_set
-        self.data = self.full_data_set
+        self.seq_data = self.full_seq_set
 
     
 if __name__ == '__main__':
     AUS_QLD_dataset_solar = CarbonDataset("AUS_QLD", "solar")
-    print(AUS_QLD_dataset_solar[0])
+    print(AUS_QLD_dataset_solar[0:6])
