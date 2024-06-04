@@ -34,8 +34,8 @@ class TestTrainingSimpleGAN:
         assert mult_gen.shape == (100, 6)
         
         condit_data = torch.randn(100,6)
-        condit_gen = two_layer_gan.generate(n_samples=100, condit_seq_data=condit_data)
-        assert condit_gen.shape == (100, 6)
+        condit_gen = two_layer_gan.generate(n_samples=100, generation_len=12, condit_seq_data=condit_data)
+        assert condit_gen.shape == (100, 12)
         
         temp_path = pathlib.Path("logs/TEMP_SIMPLE_GAN")
         shutil.rmtree(temp_path)

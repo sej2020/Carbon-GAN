@@ -145,32 +145,26 @@ class QuantEvaluation:
             return diff_seq
 
 
-class JCFE:
-    def __init__(self, model, dataset, n_samples=1000):
-        """
-        A bit different than the other guys. TBD
-        """
-        self.model = model
-        self.dataset = dataset
-        self.n_samples = n_samples
-
-    def __call__(self):
+    def jcfe(self, gen_per_sample: int=100) -> float:
         """
         """
-        rand_idx = np.random.randint(0, len(self.dataset))
-        (m, x_t), window_meta_and_seq = self.dataset[rand_idx], self.dataset[rand_idx-24:rand_idx]
-        # m: [1, metadata_dim], x_t: [1, 1], window_meta_and_data: ([window_size, metadata_dim], [window_size, 1])
-        self.model.generate(self.n_samples, og_scale=False, conditional_metadata=window_meta_and_seq)
+        if not self.model.generates_metadata:
+            for _ in range(self.n_samples):
+                rand_idx = np.random.randint(self.model.window_size, len(self.dataset))
+                sample = self.real_seq[rand_idx - self.model.window_size:rand_idx] # [window_size, 1]
+                x_t_minus, x_t = sample.view(1,-1)[:,:-1], sample.view(1,-1)[:,-1] # [1, window_size-1], [1, 1]
+                x_t_hat = self.model.generate(n_samples=gen_per_sample, generation_len=1, og_scale=False, condit_seq_data=x_t_minus)      
+                # create x_t_hat distribution using KDE
+                # calculate the probability of x_t in x_t_hat distribution
+            # calculate the average probability of x_t in x_t_hat distribution 
 
 
-
-# if __name__ == '__main__':
-#     from src.models.GANs import SimpleGAN
-#     from src.utils.data import CarbonDataset
-#     model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
-#     model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
-#     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
-#     dataset = CarbonDataset("CISO", "hydro", mode="test")
-#     quant = QuantEvaluation(model3, dataset, 100)
-#     print(quant.coverage())
-#     print(quant.bin_difference())
+if __name__ == '__main__':
+    from src.models.GANs import SimpleGAN
+    from src.utils.data import CarbonDataset
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
+    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
+    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
+    dataset = CarbonDataset("CISO", "hydro", mode="test")
+    quant = QuantEvaluation(model1, dataset, 1000)
+    quant.jcfe()

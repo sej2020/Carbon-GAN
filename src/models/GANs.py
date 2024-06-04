@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from src.evaluation.quant_evaluation import QuantEvaluation
 from torch.utils.tensorboard import SummaryWriter
 from joblib import dump, load
+import warnings
 
 torch.set_printoptions(sci_mode=False)
 
@@ -286,24 +287,29 @@ class SimpleGAN(GANBase):
         writer.close()
 
 
-    def generate(self, n_samples: int = 1, og_scale: bool = True, condit_seq_data: torch.Tensor = None) -> torch.Tensor:
+    def generate(self, n_samples: int = 1, generation_len: int = None, og_scale: bool = True, condit_seq_data: torch.Tensor = None) -> torch.Tensor:
         """
         Generates data samples from the generator.
 
         Args:
             n_samples: number of data sequences to generate
+            generation_len: length of the generated data sequence. If None, the length is equal to the window size
             og_scale: whether to return the data on its original scale. If False, the data is returned in its scaled form
             condit_seq_data: sequential data tensor to condition the generator on of shape [1, 1...window_size] or [n_samples, 1...window_size].
-                if dim(0) = 1, the tensor is repeated n_samples times
+                if dim(0) = 1, the tensor is repeated n_samples times. This data must be scaled.
 
         Returns:
             a [n_samples x window_size] tensor of generated data
         """
         assert self.seq_scaler is not None, "Model must be trained before generating data. Please train or initialize weights with a cpt file."
+        if generation_len is None:
+            generation_len = self.window_size
+        if generation_len > self.window_size:
+            warnings.warn("Generation length is greater than the window size. Performance on generations beyond window size may be poor.")
 
         self.seq_generator.train(False)
 
-        z_w = torch.randn(n_samples, self.window_size, 1, dtype=torch.float32)  # [n_samples, window_size, 1]
+        z_w = torch.randn(n_samples, generation_len, 1, dtype=torch.float32)  # [n_samples, generation_len, 1]
         
         if condit_seq_data is not None:
             assert condit_seq_data.shape[0] in [n_samples, 1], "Conditional seq data tensor must have dim(0) equal to n_samples or 1"
@@ -325,7 +331,7 @@ class SimpleGAN(GANBase):
                 out, (hidden, cell) = self.seq_generator.forward(z_c[:, t, :].unsqueeze(1), (hidden, cell))
             
             hidden[-1, :, :] = forced_hidden[:, :, -1].unsqueeze(2) # last layer of hidden becomes forced
-            # [n_samples, window_size, 1], ([n_layers, n_samples, 1], [n_layers, n_samples, 1]) -> [n_samples, window_size]
+            # [n_samples, generation_len, 1], ([n_layers, n_samples, 1], [n_layers, n_samples, 1]) -> [n_samples, generation_len]
             g = self.seq_generator.forward(z_w, (hidden, cell))[0].squeeze(2)
         
         else:
