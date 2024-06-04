@@ -297,7 +297,7 @@ class SimpleGAN(GANBase):
                 if dim(0) = 1, the tensor is repeated n_samples times
 
         Returns:
-            a tuple containing the generated metadata and seq data tensors
+            a [n_samples x window_size] tensor of generated data
         """
         assert self.seq_scaler is not None, "Model must be trained before generating data. Please train or initialize weights with a cpt file."
 
@@ -644,8 +644,8 @@ class MCGAN(GANBase):
             return g_m, g_s
     
 
-if __name__ == "__main__":
-    cpt = "logs\debug\CISO-hydro-2024-06-03_13-19-52\checkpoints\checkpt_e29.pt"
-    gan = SimpleGAN(window_size=24, n_seq_gen_layers=2, cpt_path=cpt)
-    seq = gan.generate(10, condit_seq_data=torch.randn(1, 8))
-    print(seq)
+# if __name__ == "__main__":
+#     cpt = "logs\debug\CISO-hydro-2024-06-03_13-19-52\checkpoints\checkpt_e29.pt"
+#     gan = SimpleGAN(window_size=24, n_seq_gen_layers=2, cpt_path=cpt)
+#     seq = gan.generate(10, condit_seq_data=torch.randn(1, 8))
+#     print(seq)

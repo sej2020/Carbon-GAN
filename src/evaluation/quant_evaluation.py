@@ -28,6 +28,7 @@ from sklearn.neighbors._kde import KernelDensity
 
 torch.set_printoptions(sci_mode=False)
 
+
 class QuantEvaluation:
     """
     Stores methods for quantitative evaluation of a GAN model.
@@ -163,13 +164,13 @@ class JCFE:
 
 
 
-if __name__ == '__main__':
-    from src.models.GANs import SimpleGAN
-    from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
-    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
-    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
-    dataset = CarbonDataset("CISO", "hydro", mode="test")
-    quant = QuantEvaluation(model3, dataset, 100)
-    print(quant.coverage())
-    print(quant.bin_difference())
+# if __name__ == '__main__':
+#     from src.models.GANs import SimpleGAN
+#     from src.utils.data import CarbonDataset
+#     model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
+#     model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
+#     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
+#     dataset = CarbonDataset("CISO", "hydro", mode="test")
+#     quant = QuantEvaluation(model3, dataset, 100)
+#     print(quant.coverage())
+#     print(quant.bin_difference())

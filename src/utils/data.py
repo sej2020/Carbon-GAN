@@ -119,6 +119,6 @@ class CarbonDataset(Dataset):
         self.seq_data = self.full_seq_set
 
     
-if __name__ == '__main__':
-    AUS_QLD_dataset_solar = CarbonDataset("AUS_QLD", "solar")
-    print(AUS_QLD_dataset_solar[0:6])
+# if __name__ == '__main__':
+#     AUS_QLD_dataset_solar = CarbonDataset("AUS_QLD", "solar")
+#     print(AUS_QLD_dataset_solar[0:6])

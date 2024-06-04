@@ -18,7 +18,7 @@ Typical usage example:
 >>> qual.plot_histograms()
 ```
 """
-
+import pathlib
 import matplotlib.pyplot as plt
 
 
@@ -59,44 +59,47 @@ class QualEvaluation:
         else:
             self.gen_seq = self.model.generate(n_samples, og_scale=False)
             self.real_seq = self.dataset.seq_data
+            self.gen_meta = None
+            self.real_meta = None
     
 
-    def plot_tsne(self, save: bool = False, save_path: str = None):
+    def plot_tsne(self, save: bool = False, save_dir: str = None):
         """
         TBD
         """
         raise NotImplementedError
     
 
-    def plot_pca(self, save: bool = False, save_path: str = None):
+    def plot_pca(self, save: bool = False, save_dir: str = None):
         """
         TBD  
         """
         raise NotImplementedError
     
 
-    def plot_autocorr(self, save: bool = False, save_path: str = None):
+    def plot_autocorr(self, save: bool = False, save_dir: str = None):
         """
         TBD  
         """
         raise NotImplementedError
     
 
-    def plot_moving_avg(self, save: bool = False, save_path: str = None):
+    def plot_moving_avg(self, save: bool = False, save_dir: str = None):
         """
         TBD  
         """
         raise NotImplementedError
 
 
-    def plot_histograms(self, n_bins: int = 50, save: bool = False, save_path: str = None):
+    def plot_histograms(self, n_bins: int = 50, save: bool = False, save_dir: str = None):
         """
         Creates two figures, one for metadata and one for data, with density histograms for generated data and real data.
 
         Args:
             n_bins: The number of bins to use in the histograms
+            save: Whether to save the plots
+            save_dir: The directory to save the plots to
         """
-        
         gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy() # [n_samples, 1]
         real_seq = self.real_seq.detach().numpy() # [n_samples, 1]
 
@@ -107,7 +110,9 @@ class QualEvaluation:
         plt.legend()
 
         if save:
-            plt.savefig(save_path, bbox_inches='tight')
+            pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+            fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_seq_hist.png"
+            plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
         else:
             plt.show() 
 
@@ -128,7 +133,9 @@ class QualEvaluation:
                         axs[i, j].legend()
                 
             if save:
-                plt.savefig(save_path, bbox_inches='tight')
+                pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+                fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_meta_hist.png"
+                plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
             else:
                 plt.show()
 
@@ -136,12 +143,12 @@ class QualEvaluation:
 
 
 
-if __name__ == "__main__":
-    from src.models.GANs import SimpleGAN
-    from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
-    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
-    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
-    dataset = CarbonDataset("CISO", "hydro", mode="test")
-    qual = QualEvaluation(model3, dataset, 1000)
-    qual.plot_histograms()
+# if __name__ == "__main__":
+#     from src.models.GANs import SimpleGAN
+#     from src.utils.data import CarbonDataset
+#     model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
+#     model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
+#     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
+#     dataset = CarbonDataset("CISO", "hydro", mode="test")
+#     qual = QualEvaluation(model3, dataset, 1000)
+#     qual.plot_histograms()

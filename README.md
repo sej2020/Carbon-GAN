@@ -7,3 +7,5 @@ How to configure this repo:
 3. run `conda env create -f environment.yml`
 4. run `conda activate carbon-gan`
 5. run `conda install -c conda-forge tensorboard` to install tensorboard
+
+How to run tests: `python -m pytest tests/`
