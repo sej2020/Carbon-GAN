@@ -66,7 +66,7 @@ class QuantEvaluation:
             self.real_seq = self.dataset.seq_data
 
 
-    def coverage(self) -> tuple[float, float] | float:
+    def coverage(self) -> tuple[float, float] | np.float64:
         """
         'Computes the probability mass of the true data "covered" by the 95th quantile of the model density.'
         The model density is estimated using a Gaussian kernel density estimator.
@@ -183,11 +183,11 @@ class QuantEvaluation:
                 kde.fit(x_t_hat.detach().numpy())
                 # calculating the probability of x_t in x_t_hat distribution
                 x_t_prob = np.exp(kde.score_samples(x_t.reshape(-1,1)))
-                total_x_t_prob += x_t_prob
+                total_x_t_prob += x_t_prob.item()
 
             # calculating the average probability of x_t in x_t_hat distribution 
             jcfe = total_x_t_prob / self.n_samples
-            return jcfe
+            return np.float64(jcfe)
 
 if __name__ == '__main__':
     from src.models.GANs import SimpleGAN

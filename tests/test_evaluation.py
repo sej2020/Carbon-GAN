@@ -41,6 +41,12 @@ class TestQualEvalSimpleGAN:
         assert qual_eval.gen_seq is not None
         qual_eval.plot_histograms(n_bins=20, save=True, save_dir="logs/TEMP_SIMPLE_GAN/histograms")
         assert pathlib.Path.exists(pathlib.Path("logs/TEMP_SIMPLE_GAN/histograms/FPL_other_seq_hist.png"))
+
+    def test_plot_autocorr(self, fpl_other_test_set):
+        gan = SimpleGAN(window_size=12, n_seq_gen_layers=1, cpt_path="logs/TEMP_SIMPLE_GAN/checkpoints/checkpt_e4.pt")
+        qual_eval = QualEvaluation(gan, fpl_other_test_set, 100)
+        qual_eval.plot_autocorr(save=True, save_dir="logs/TEMP_SIMPLE_GAN/autocorr")
+        assert pathlib.Path.exists(pathlib.Path("logs/TEMP_SIMPLE_GAN/autocorr/FPL_other_autocorr.png"))
   
 
 class TestQuantEvalSimpleGAN:
@@ -56,5 +62,12 @@ class TestQuantEvalSimpleGAN:
         gan = SimpleGAN(window_size=12, n_seq_gen_layers=1, cpt_path="logs/TEMP_SIMPLE_GAN/checkpoints/checkpt_e4.pt")
         quant_eval = QuantEvaluation(gan, fpl_other_test_set, 100)
         result = quant_eval.bin_difference()
+        assert type(result) == np.float64
+        assert result >= 0.0 and result <= 1.0
+    
+    def test_jcfe(self, fpl_other_test_set):
+        gan = SimpleGAN(window_size=12, n_seq_gen_layers=1, cpt_path="logs/TEMP_SIMPLE_GAN/checkpoints/checkpt_e4.pt")
+        quant_eval = QuantEvaluation(gan, fpl_other_test_set, 100)
+        result = quant_eval.jcfe()
         assert type(result) == np.float64
         assert result >= 0.0 and result <= 1.0
