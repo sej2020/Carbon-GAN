@@ -57,6 +57,7 @@ class QuantEvaluation:
         """
         self.model = model
         self.dataset = dataset
+        self.n_samples = n_samples
         if model.generates_metadata:
             self.gen_meta, self.gen_seq = self.model.generate(n_samples, og_scale=False)
             self.real_meta, self.real_seq = self.dataset.metadata, self.dataset.seq_data
@@ -73,6 +74,9 @@ class QuantEvaluation:
         Returns:
             C_meta: The coverage statistic for metadata
             C_seq: The coverage statistic for the sequential data
+
+        Notes:
+            Higher coverage values indicate better model performance
         """
         # Generated data
         gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy()
@@ -120,6 +124,9 @@ class QuantEvaluation:
         Returns:
             (diff_meta): The average absolute difference between the bin values of the real and generated metadata if model generates metadata
             diff_seq: The average absolute difference between the bin values of the real and generated sequential data
+        
+        Notes:
+            Lower bin difference values indicate better model performance
         """
         gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy()
         real_seq = self.real_seq.detach().numpy()
@@ -147,17 +154,40 @@ class QuantEvaluation:
 
     def jcfe(self, gen_per_sample: int=100) -> float:
         """
+        Calculates the Johnson Conditional Fidelity Estimate of the model. A point x_t is sampled from real data, along with its preceding
+        points x_t_minus. The model is then conditioned on x_t_minus to generate gen_per_sample x_t_hats. A model probability density function
+        conditioned on x_t_minus is created using a Gaussian kernel density estimator, and the probability of x_t in the x_t_hat distribution
+        is calculated. This process is repeated n_samples times, and the average probability of x_t in the x_t_hat distribution is returned.
+
+        Args: 
+            gen_per_sample: The number of samples to generate per sample from the real data
+
+        Returns:
+            The Johnson Conditional Fidelity Estimate of the model
+
+        Notes:
+            Higher JCFE values indicate better model performance
         """
         if not self.model.generates_metadata:
+            total_x_t_prob = 0
             for _ in range(self.n_samples):
+                # sampling x_t from real data
                 rand_idx = np.random.randint(self.model.window_size, len(self.dataset))
-                sample = self.real_seq[rand_idx - self.model.window_size:rand_idx] # [window_size, 1]
+                sample = self.real_seq[rand_idx - self.model.window_size : rand_idx] # [window_size, 1]
                 x_t_minus, x_t = sample.view(1,-1)[:,:-1], sample.view(1,-1)[:,-1] # [1, window_size-1], [1, 1]
-                x_t_hat = self.model.generate(n_samples=gen_per_sample, generation_len=1, og_scale=False, condit_seq_data=x_t_minus)      
-                # create x_t_hat distribution using KDE
-                # calculate the probability of x_t in x_t_hat distribution
-            # calculate the average probability of x_t in x_t_hat distribution 
+                
+                # generating x_t_hat conditioned on x_t_minus
+                x_t_hat = self.model.generate(n_samples=gen_per_sample, generation_len=1, og_scale=False, condit_seq_data=x_t_minus) # [gen_per_sample, 1]    
+                # creating x_t_hat distribution using KDE
+                kde = KernelDensity(kernel='gaussian', bandwidth='silverman')
+                kde.fit(x_t_hat.detach().numpy())
+                # calculating the probability of x_t in x_t_hat distribution
+                x_t_prob = np.exp(kde.score_samples(x_t.reshape(-1,1)))
+                total_x_t_prob += x_t_prob
 
+            # calculating the average probability of x_t in x_t_hat distribution 
+            jcfe = total_x_t_prob / self.n_samples
+            return jcfe
 
 if __name__ == '__main__':
     from src.models.GANs import SimpleGAN
@@ -167,4 +197,8 @@ if __name__ == '__main__':
     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
     dataset = CarbonDataset("CISO", "hydro", mode="test")
     quant = QuantEvaluation(model1, dataset, 1000)
-    quant.jcfe()
+    print(quant.jcfe())
+    quant = QuantEvaluation(model2, dataset, 1000)
+    print(quant.jcfe())
+    quant = QuantEvaluation(model3, dataset, 1000)
+    print(quant.jcfe())
