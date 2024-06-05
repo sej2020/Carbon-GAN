@@ -19,6 +19,7 @@ Typical usage example:
 ```
 """
 import pathlib
+import numpy as np
 import matplotlib.pyplot as plt
 
 
@@ -53,6 +54,7 @@ class QualEvaluation:
         """
         self.model = model
         self.dataset = dataset
+        self.n_samples = n_samples
         if model.generates_metadata:
             self.gen_meta, self.gen_seq = self.model.generate(n_samples, og_scale=False)
             self.real_meta, self.real_seq = self.dataset.metadata, self.dataset.seq_data
@@ -65,23 +67,60 @@ class QualEvaluation:
 
     def plot_tsne(self, save: bool = False, save_dir: str = None):
         """
-        TBD
+        To be implemented when the model is generating multivariate time series data.
         """
         raise NotImplementedError
     
 
     def plot_pca(self, save: bool = False, save_dir: str = None):
         """
-        TBD  
+        To be implemented when the model is generating multivariate time series data. 
         """
         raise NotImplementedError
     
 
     def plot_autocorr(self, save: bool = False, save_dir: str = None):
         """
-        TBD  
+        Plots the averaged autocorrelation of many samples of generated and real data. 
+
+        Args:
+            save: Whether to save the plot
+            save_dir: The directory to save the plot to
         """
-        raise NotImplementedError
+        gen_seq = self.gen_seq.detach().numpy() # [n_samples, window_size]
+        total_auto_corr = np.zeros((2*gen_seq.shape[1]-1))
+        for row in range(gen_seq.shape[0]): 
+            lags, c, line, b = plt.acorr(gen_seq[row], maxlags=None)
+            total_auto_corr += c
+        total_auto_corr /= gen_seq.shape[0]
+        plt.clf()
+
+        real_seq_samples = np.zeros((self.n_samples, self.model.window_size))
+        for i in range(self.n_samples):
+            rand_idx = np.random.randint(self.real_seq.shape[0])
+            sample = self.real_seq[rand_idx - self.model.window_size : rand_idx]
+            real_seq_samples[i] = sample.flatten()
+        
+        total_auto_corr_real = np.zeros((2*real_seq_samples.shape[1]-1))
+        for row in range(real_seq_samples.shape[0]): 
+            lags, c, line, b = plt.acorr(real_seq_samples[row], maxlags=None)
+            total_auto_corr_real += c
+        total_auto_corr_real /= real_seq_samples.shape[0]
+        plt.clf()
+        len_win = self.model.window_size - 1
+        plt.plot(lags[len_win:], total_auto_corr[len_win:], label='Generated')
+        plt.plot(lags[len_win:], total_auto_corr_real[len_win:], label='Real')
+        plt.title("Autocorrelation of Generated and Real Data")
+        plt.xlabel("Lag")
+        plt.ylabel("Autocorrelation")
+        plt.legend()
+
+        if save:
+            pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+            fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_autocorr.png"
+            plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
+        else:
+            plt.show()
     
 
     def plot_moving_avg(self, save: bool = False, save_dir: str = None):
@@ -143,12 +182,12 @@ class QualEvaluation:
 
 
 
-# if __name__ == "__main__":
-#     from src.models.GANs import SimpleGAN
-#     from src.utils.data import CarbonDataset
-#     model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
-#     model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
-#     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
-#     dataset = CarbonDataset("CISO", "hydro", mode="test")
-#     qual = QualEvaluation(model3, dataset, 1000)
-#     qual.plot_histograms()
+if __name__ == "__main__":
+    from src.models.GANs import SimpleGAN
+    from src.utils.data import CarbonDataset
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
+    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
+    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
+    dataset = CarbonDataset("CISO", "hydro", mode="test")
+    qual = QualEvaluation(model1, dataset, 100)
+    qual.plot_autocorr()
