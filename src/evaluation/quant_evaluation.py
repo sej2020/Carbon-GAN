@@ -1,12 +1,11 @@
 """
 Classes for quantitative evaluation of a GAN model. Most metrics are methods under the QuantEvaluation class, which is instantiated 
-with a model and dataset. The JCFE class is a separate class that is called on a model and dataset to evaluate the model's ability 
-to model temporal relationships in the data and requires data generation conditional on a window of metadata and sequential data, unlike 
-the other metrics.
+with a model and dataset
 
 The QuantEvaluation class has the following methods:
 - Coverage - Ref: https://github.com/tolstikhin/adagan/blob/master/metrics.py
 - Bin Difference
+- Johnson Conditional Fidelity Estimate (JCFE)
 - Post-Hoc Discriminator Performance
 - Anomaly Detection Performance (train on generated, predict on real)
 - Forecasting Performance (train on generated, predict on real)
@@ -152,7 +151,7 @@ class QuantEvaluation:
             return diff_seq
 
 
-    def jcfe(self, gen_per_sample: int=100) -> float:
+    def jcfe(self, gen_per_sample: int = 100) -> float:
         """
         Calculates the Johnson Conditional Fidelity Estimate of the model. A point x_t is sampled from real data, along with its preceding
         points x_t_minus. The model is then conditioned on x_t_minus to generate gen_per_sample x_t_hats. A model probability density function
@@ -189,6 +188,71 @@ class QuantEvaluation:
             jcfe = total_x_t_prob / self.n_samples
             return np.float64(jcfe)
 
+
+    def discriminator_accuracy(self):
+        """
+        Trains a discriminator on sequences of real and generated data, and returns accuracy on a test set.
+
+        Returns:
+            The accuracy of the discriminator on the generated data
+
+        Notes:
+            Lower discriminator error values indicate better model performance
+        """
+        gen_train_set = self.gen_seq
+        real_train_set = torch.zeros((self.n_samples, self.model.window_size))
+        for i in range(self.n_samples):
+            rand_idx = np.random.randint(self.model.window_size, int(self.real_seq.shape[0]*0.66))
+            sample = self.real_seq[rand_idx - self.model.window_size : rand_idx]
+            real_train_set[i] = sample.squeeze()
+
+        train_set = torch.cat((gen_train_set, real_train_set), dim=0)
+        labels = torch.cat((torch.zeros(self.n_samples), torch.ones(self.n_samples)), dim=0)
+        train_perm = torch.randperm(train_set.size()[0])
+        train_set = train_set[train_perm]
+        labels = labels[train_perm]
+        
+        half_test_size = int(self.n_samples/2)
+        gen_test_set = self.model.generate(half_test_size, og_scale=False)
+        real_test_set = torch.zeros((half_test_size, self.model.window_size))
+        for i in range(half_test_size):
+            rand_idx = np.random.randint(int(self.real_seq.shape[0]*0.66) + self.model.window_size, self.real_seq.shape[0])
+            sample = self.real_seq[rand_idx - self.model.window_size : rand_idx]
+            real_test_set[i] = sample.squeeze()
+        
+        test_set = torch.cat((gen_test_set, real_test_set), dim=0)
+        test_labels = torch.cat((torch.zeros(half_test_size), torch.ones(half_test_size)), dim=0)
+        test_perm = torch.randperm(test_set.size()[0])
+        test_set = test_set[test_perm]
+        test_labels = test_labels[test_perm]
+
+        post_hoc_disc = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float32)
+        criterion = torch.nn.BCELoss()
+        optimizer = torch.optim.Adam(post_hoc_disc.parameters(), lr=0.01)
+        for epoch in range(500):
+            batch_x = train_set.detach().unsqueeze(2)
+            _, (h, _) = post_hoc_disc(batch_x)
+            h_bin = torch.sigmoid(h.squeeze())
+            loss = criterion(h_bin, labels)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            if epoch % 10 == 0:
+                print(f"Epoch: {epoch}, Training Loss: {loss.item()}")
+            if loss.item() < 0.34:
+                break
+
+        with torch.no_grad():
+            _, (h, _) = post_hoc_disc(test_set.unsqueeze(2))
+            h_bin = torch.sigmoid(h.squeeze())
+            acc = torch.sum((h_bin.squeeze() > 0.5) == test_labels).item() / (2*half_test_size)
+            return np.float64(acc)
+
+
+
+
+
+
 if __name__ == '__main__':
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
@@ -196,9 +260,5 @@ if __name__ == '__main__':
     model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
     model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
     dataset = CarbonDataset("CISO", "hydro", mode="test")
-    quant = QuantEvaluation(model1, dataset, 1000)
-    print(quant.jcfe())
-    quant = QuantEvaluation(model2, dataset, 1000)
-    print(quant.jcfe())
-    quant = QuantEvaluation(model3, dataset, 1000)
-    print(quant.jcfe())
+    quant = QuantEvaluation(model3, dataset, 2000)
+    print(quant.discriminator_accuracy())
