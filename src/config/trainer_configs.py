@@ -14,7 +14,7 @@ class TrainerConfig:
         lr_D: float,
         k: int,
         run_name: str,
-        lr_scheduler = False,
+        lr_scheduler: str = None,
         disable_tqdm = False,
         logging_dir = "logs",
         logging_frequency = 0.1,
@@ -34,7 +34,7 @@ class TrainerConfig:
             lr_D: The learning rate for training the discriminator
             k: The number of times to train the discriminator for each generator training step
             run_name: The name of the run
-            lr_scheduler: Whether to use a learning rate scheduler
+            lr_scheduler: The lr scheduler to use. Options: "cosine", "exponential", "triangle2"
             disable_tqdm: Whether to disable progress bar
             logging_dir: The directory to save the logs
             logging_frequency: how often to evaluate the model on the test set, log the training metrics, and save the model 
@@ -85,7 +85,7 @@ class MCGANTrainerConfig(TrainerConfig):
         lr_D: float,
         k: int,
         run_name: str,
-        lr_scheduler = False,
+        lr_scheduler: str = None,
         disable_tqdm = False,
         logging_dir = "logs",
         logging_frequency = 0.1,
@@ -106,7 +106,7 @@ class MCGANTrainerConfig(TrainerConfig):
             lr_D: The learning rate for training the discriminator
             k: The number of times to train the discriminator for each generator training step
             run_name: The name of the run
-            lr_scheduler: Whether to use a learning rate scheduler
+            lr_scheduler: The lr scheduler to use. Options: "cosine", "exponential", "triangle2"
             disable_tqdm: Whether to disable progress bar
             logging_dir: The directory to save the logs
             logging_frequency: how often to evaluate the model on the test set, log the training metrics, and save the model 

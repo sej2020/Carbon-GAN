@@ -3,7 +3,7 @@ Script for training a simple GAN model.
 
 Typical usage example:
 ```bash
->>> python -m src.actions.train_GAN simple --debug --region CISO --elec_source hydro --n_epochs 500 --batch_size 128 --lr_scheduler --disable_tqdm
+>>> python -m src.actions.train_GAN simple --debug --region CISO --elec_source hydro --n_epochs 500 --batch_size 128 --lr_scheduler exponential --disable_tqdm
 ```
 And to view the training progress, run the following command in the terminal:
 ```bash
@@ -43,11 +43,11 @@ parser.add_argument("--elec_source", type=str,
     ])
 parser.add_argument("--n_epochs", type=int, required=True)
 parser.add_argument("--batch_size", type=int, required=True)
-parser.add_argument("--lr_Gs", type=float, default=0.005)
-parser.add_argument("--lr_D", type=float, default=0.001)
+parser.add_argument("--lr_Gs", type=float, default=0.0005)
+parser.add_argument("--lr_D", type=float, default=0.0005)
 parser.add_argument("--k", type=int, default=1, help="Number of times to train the discriminator for each generator training step")
 parser.add_argument("--run_name", type=str, default=None)
-parser.add_argument("--lr_scheduler", action=argparse.BooleanOptionalAction, default=False)
+parser.add_argument("--lr_scheduler", type=str, default=None, choices=["cosine", "exponential", "triangle2"], help="Learning rate scheduler to use")
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--logging_frequency", type=float, default=0.1)
 parser.add_argument("--resume_from_cpt", type=argparse.BooleanOptionalAction, default=False)

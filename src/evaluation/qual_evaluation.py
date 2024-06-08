@@ -97,7 +97,7 @@ class QualEvaluation:
 
         real_seq_samples = np.zeros((self.n_samples, self.model.window_size))
         for i in range(self.n_samples):
-            rand_idx = np.random.randint(self.real_seq.shape[0])
+            rand_idx = np.random.randint(self.model.window_size, self.real_seq.shape[0])
             sample = self.real_seq[rand_idx - self.model.window_size : rand_idx]
             real_seq_samples[i] = sample.flatten()
         
@@ -185,9 +185,10 @@ class QualEvaluation:
 if __name__ == "__main__":
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e9.pt")
-    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e119.pt")
-    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-2024-06-03_14-43-34\checkpoints\checkpt_e299.pt")
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v57.2\checkpoints\checkpt_e59.pt")
+    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e399.pt")
+    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e999.pt")
     dataset = CarbonDataset("CISO", "hydro", mode="test")
     qual = QualEvaluation(model1, dataset, 100)
+    qual.plot_histograms()
     qual.plot_autocorr()

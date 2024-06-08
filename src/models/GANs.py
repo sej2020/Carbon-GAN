@@ -62,7 +62,7 @@ class GANBase(torch.nn.Module):
         raise NotImplementedError("generate method must be implemented in child class")
     
 
-    def evaluate(self, n_samples: int = 1000) -> tuple[np.ndarray, np.float64]:
+    def evaluate(self, n_samples: int = 300) -> dict[str, np.float64]:
         """
         Evaluates the model using the QuantEvaluation metric "bin_difference".
 
@@ -71,7 +71,11 @@ class GANBase(torch.nn.Module):
         """
         dataset = CarbonDataset(self.cfg.region, self.cfg.elec_source, mode="test")
         quant_eval = QuantEvaluation(self, dataset, n_samples)
-        return quant_eval.bin_difference()
+        return {
+            "Bin Difference": quant_eval.bin_difference(), 
+            "Coverage": quant_eval.coverage(), 
+            "JCFE": quant_eval.jcfe()
+            }
 
 
     def _save_checkpoint(self, checkpoint_dict: dict):
@@ -116,7 +120,7 @@ class SimpleGAN(GANBase):
         self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, batch_first=True, dtype=torch.float32)
         self.discriminator = torch.nn.Sequential(
             torch.nn.Linear(window_size, int(window_size/2), dtype=torch.float32),
-            torch.nn.ReLU(),
+            torch.nn.LeakyReLU(),
             torch.nn.Linear(int(window_size/2), 1, dtype=torch.float32),
             torch.nn.Sigmoid()
         )
@@ -173,9 +177,30 @@ class SimpleGAN(GANBase):
         writer = SummaryWriter(log_dir=writer_path)
         logging_steps = int(1 / self.cfg.logging_frequency)
 
-        if self.cfg.lr_scheduler:
-            scheduler_Gs = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_Gs, self.cfg.n_epochs)
-            scheduler_D = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_D, self.cfg.n_epochs)
+        if self.cfg.lr_scheduler is not None:
+            if self.cfg.lr_scheduler == "cosine":
+                scheduler_Gs = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_Gs, self.cfg.n_epochs)
+                scheduler_D = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_D, self.cfg.n_epochs)
+            elif self.cfg.lr_scheduler == "exponential":
+                gamma = (1/10)**(1/self.cfg.n_epochs)
+                scheduler_Gs = torch.optim.lr_scheduler.ExponentialLR(optimizer_Gs, gamma=gamma)
+                scheduler_D = torch.optim.lr_scheduler.ExponentialLR(optimizer_D, gamma=gamma)
+            elif self.cfg.lr_scheduler == "triangle2":
+                scheduler_Gs = torch.optim.lr_scheduler.CyclicLR(
+                    optimizer_Gs, 
+                    base_lr=self.cfg.lr_Gs/100, 
+                    max_lr=self.cfg.lr_Gs, 
+                    step_size_up=self.cfg.n_epochs/20,
+                    mode="triangular2"
+                    )
+                scheduler_D = torch.optim.lr_scheduler.CyclicLR(
+                    optimizer_D,
+                    base_lr=self.cfg.lr_D/100,
+                    max_lr=self.cfg.lr_D,
+                    step_size_up=self.cfg.n_epochs/20,
+                    mode="triangular2"
+                    )
+            
 
         if self.cfg.resume_from_cpt:
             self.checkpoint_dict = torch.load(self.cfg.cpt_path)
@@ -194,6 +219,7 @@ class SimpleGAN(GANBase):
                 initial=self.checkpoint_dict["epoch"] + 1,
             )
 
+        # noise_scale = 0.5
         for epoch_n in pbar:
             epoch_loss_D = []
             epoch_loss_G = []
@@ -221,6 +247,7 @@ class SimpleGAN(GANBase):
                     # [batch, window] -> [batch]
                     d_gD = self.discriminator.forward(g_D)
                     # [batch, window] -> [batch]
+                    # k_batch = k_batch + noise_scale * torch.randn_like(k_batch)
                     d_D = self.discriminator.forward(k_batch)
                     optimizer_D.zero_grad()
                     loss_D = criterion_D(d_D, d_gD)
@@ -240,16 +267,17 @@ class SimpleGAN(GANBase):
 
                 if self.cfg.debug:
                     if b_idx % 40 == 0:
+                        gradient_magnitude_disc = 0
                         gradient_magnitude_seq = 0
                         weight_magnitude_seq = 0
                         # Monitoring gradients
                         for weight in self.seq_generator.all_weights[0]:
                             gradient_magnitude_seq += torch.norm(weight.grad).item()
                             weight_magnitude_seq += torch.norm(weight).item()
-                        if torch.isnan(torch.tensor(gradient_magnitude_seq)):
-                            breakpoint()
-                        else:
-                            print(f"Ep {epoch_n}.{b_idx}: Loss_D = {loss_D.item():.3}, Loss_G = {loss_G.item():.3}, G_s grad mag = {gradient_magnitude_seq:.3}, G_s weight mag = {weight_magnitude_seq:.3}")
+                        for layer in self.discriminator:
+                            if hasattr(layer, "weight"):
+                                gradient_magnitude_disc += torch.norm(layer.weight.grad).item()
+                        print(f"Ep {epoch_n}.{b_idx}: Loss_D = {loss_D.item():.4}, Loss_G = {loss_G.item():.4}, G_s weight mag = {weight_magnitude_seq:.4}, G_s grad mag = {gradient_magnitude_seq:.4}, D grad mag = {gradient_magnitude_disc:.4}")
 
                 optimizer_Gs.step()
 
@@ -258,7 +286,7 @@ class SimpleGAN(GANBase):
 
 
             if (epoch_n+1) % logging_steps == 0:
-                eval_bin_difference = self.evaluate()
+                eval_dict = self.evaluate()
                 writer.add_scalars(
                     "Training Loss", 
                     {"Generator" : sum(epoch_loss_G)/len(epoch_loss_G), "Discriminator": sum(epoch_loss_D)/len(epoch_loss_D)}, 
@@ -266,7 +294,7 @@ class SimpleGAN(GANBase):
                     )
                 writer.add_scalars(
                     "Evaluation Metrics", 
-                    {"Seq Bin Diff": eval_bin_difference},
+                    {"Bin Overlap": 1 - eval_dict["Bin Difference"], "Coverage": eval_dict["Coverage"], "JCFE": eval_dict["JCFE"]},
                     epoch_n
                     )
                 self._save_checkpoint({
@@ -281,7 +309,9 @@ class SimpleGAN(GANBase):
                 scheduler_Gs.step()
                 scheduler_D.step()
             
-            pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.3}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.3}")
+            # noise_scale = noise_scale * (1/100)**(1/self.cfg.n_epochs)
+            
+            pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.4}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.4}")
 
         writer.flush()
         writer.close()
