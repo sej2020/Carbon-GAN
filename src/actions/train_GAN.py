@@ -11,7 +11,8 @@ And to view the training progress, run the following command in the terminal:
 ```
 Clean up the logs directory after training is complete.
 """
-
+import multiprocessing as mp
+import random
 import argparse
 import datetime
 from src.config.trainer_configs import TrainerConfig, MCGANTrainerConfig
@@ -57,7 +58,32 @@ parser.add_argument("--cpt_path", type=str, default=None)
 parser.add_argument("--lr_Gm", type=float, default=0.001, help="Learning rate for the metadata generator")
 parser.add_argument("--metadata_dim", type=int, default=8, help="Dimension of the metadata: if using provided dataset, this is 8.")
 
+# Hacks
+parser.add_argument("--dropout_Gs", type=float, default=0.0, help="Dropout rate for the generator")
+parser.add_argument("--dropout_D_hid", type=float, default=0.0, help="Dropout rate for the hidden layer of the discriminator")
+parser.add_argument("--dropout_D_in", type=float, default=0.0, help="Dropout rate for the input layer of the discriminator")
+parser.add_argument("--hidden_lyr_dim_D", type=int, default=12, help="Number of neurons in the hidden layer of the discriminator")
+parser.add_argument("--noisy_input", action=argparse.BooleanOptionalAction, default=False, help="Whether to add noise to the input data for the discriminator")
+parser.add_argument("--adaptive_lr", action=argparse.BooleanOptionalAction, default=False, help="Whether to use a bin overlap dependent learning rate")
+parser.add_argument("--label_smoothing", action=argparse.BooleanOptionalAction, default=False, help="Whether to use label smoothing for the discriminator")
+parser.add_argument("--sup_loss", action=argparse.BooleanOptionalAction, default=False, help="Whether to use supervised training for the generator")
+parser.add_argument("--eta", type=float, default=1, help="tuning supervised loss influence on generator")
+
+parser.add_argument("--n_jobs", type=int, default=1, help="How many runs to execute in parallel")
+
 args = parser.parse_args()
+
+hack_dict = {
+    "dropout_Gs": args.dropout_Gs,
+    "dropout_D_hid": args.dropout_D_hid,
+    "dropout_D_in": args.dropout_D_in,
+    "hidden_lyr_dim_D": args.hidden_lyr_dim_D,
+    "noisy_input": args.noisy_input,
+    "adaptive_lr": args.adaptive_lr,
+    "label_smoothing": args.label_smoothing,
+    "sup_loss": args.sup_loss,
+    "eta": args.eta
+}
 
 if args.run_name:
     NAME = args.run_name
@@ -71,7 +97,7 @@ else:
     LOGGING_DIR = f"logs"
 
 if args.model_type == "simple":
-    GAN = SimpleGAN(window_size=args.window_size, n_seq_gen_layers=args.n_seq_gen_layers)
+    GAN = SimpleGAN(window_size=args.window_size, n_seq_gen_layers=args.n_seq_gen_layers, hack_dict=hack_dict)
     config = TrainerConfig(
         region=args.region,
         elec_source=args.elec_source,
@@ -110,6 +136,16 @@ elif args.model_type == "mcgan":
         debug=args.debug
     )
 
-GAN.train(config)
-print(f"Training complete.", flush=True)
-print(f"Logs saved at {LOGGING_DIR}: don't forget to clean up the logging directory when you're done", flush=True)
+def name_and_train(config):
+    # adding random number to run name to avoid conflicts
+    config.run_name = config.run_name + f"--{random.randint(0, 100000)}"
+    GAN.train(config)
+
+if __name__ == "__main__":
+    if args.n_jobs > 1:
+        with mp.Pool(args.n_jobs) as pool:
+            pool.map(name_and_train, [config for _ in range(args.n_jobs)])
+    else:
+        GAN.train(config)
+    print(f"Training complete.", flush=True)
+    print(f"Logs saved at {LOGGING_DIR}: don't forget to clean up the logging directory when you're done", flush=True)

@@ -105,7 +105,7 @@ class SimpleGAN(GANBase):
         seq_scaler: The standard scaler object for the sequential data
         cfg: configuration for training
     """
-    def __init__(self, window_size: int, n_seq_gen_layers: int, cpt_path: str = None):
+    def __init__(self, window_size: int, n_seq_gen_layers: int, cpt_path: str = None, hack_dict: dict = None):
         """
         Initializes Simple GAN model.
 
@@ -115,17 +115,26 @@ class SimpleGAN(GANBase):
             cpt_path: path to a checkpoint file to use for weights initialization. If None, weights are initialized randomly.
                 scalers must be in a folder called 'scalers' in the same directory as the folder 'checkpoints' containing the 
                 checkpoint file
+            hack_dict: temp
         """
         super().__init__()
-        self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, batch_first=True, dtype=torch.float32)
+        if hack_dict:
+            self.hack_dict = hack_dict
+        else:
+            self.hack_dict = {}
+        if hack_dict and hack_dict["dropout_Gs"]:
+            self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, dropout=hack_dict["dropout_Gs"], batch_first=True, dtype=torch.float32)
+        else:
+            self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, batch_first=True, dtype=torch.float32)
         self.discriminator = torch.nn.Sequential(
-            torch.nn.Linear(window_size, int(window_size/2), dtype=torch.float32),
+            torch.nn.Dropout(hack_dict["dropout_D_in"] if hack_dict else 0),
+            torch.nn.Linear(window_size, int(hack_dict["hidden_lyr_dim_D"] if hack_dict else 12), dtype=torch.float32),
             torch.nn.LeakyReLU(),
-            torch.nn.Linear(int(window_size/2), 1, dtype=torch.float32),
+            torch.nn.Dropout(hack_dict["dropout_D_hid"] if hack_dict else 0),
+            torch.nn.Linear(int(hack_dict["hidden_lyr_dim_D"] if hack_dict else 12), 1, dtype=torch.float32),
             torch.nn.Sigmoid()
         )
         self.window_size = window_size
-
         if cpt_path:
             self.checkpoint_dict = torch.load(cpt_path)
             seq_generator_dict = self.checkpoint_dict['Gs_state_dict']
@@ -136,6 +145,36 @@ class SimpleGAN(GANBase):
 
             self.seq_scaler = load(f"{pathlib.Path(cpt_path).parent.parent}/scalers/seq_scaler.joblib")
     
+    def prepare_data(self):
+        """
+        Creates training dataset by scaling, windowing, then shuffling the sequential data
+        """
+        training_data = CarbonDataset(self.cfg.region, self.cfg.elec_source)
+        # saving the fitted scalers
+        scaler_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/scalers")
+        scaler_path.mkdir(parents=True, exist_ok=True)
+        dump(training_data.seq_scaler, scaler_path / "seq_scaler.joblib")
+        self.seq_scaler = training_data.seq_scaler
+
+        dataX = []
+        dataY = []
+        for i in range(0, len(training_data) - self.window_size):
+            dataX.append(training_data[i:i + self.window_size][1].squeeze())
+            dataY.append(training_data[i + self.window_size][1])
+
+        rand_idx = np.random.permutation(len(dataX))
+
+        X_train = []
+        y_train = []
+        for i in range(len(dataX)):
+            X_train.append(dataX[rand_idx[i]])
+            y_train.append(dataY[rand_idx[i]])
+
+        X_train = torch.vstack(X_train)
+        y_train = torch.vstack(y_train)
+
+        return X_train, y_train
+
 
     def train(self, cfg):
         """
@@ -158,18 +197,25 @@ class SimpleGAN(GANBase):
         hp_path.mkdir(parents=True, exist_ok=True)
         with open(f"{hp_path}/trainer_config.txt", "w") as file:
             file.write(str(self.cfg))
-        
-        training_data = CarbonDataset(self.cfg.region, self.cfg.elec_source)
-        # saving the fitted scalers
-        scaler_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/scalers")
-        scaler_path.mkdir(parents=True, exist_ok=True)
-        dump(training_data.seq_scaler, scaler_path / "seq_scaler.joblib")
-        self.seq_scaler = training_data.seq_scaler
+
+        X_train, y_train = self.prepare_data()
 
         optimizer_Gs = torch.optim.Adam(self.seq_generator.parameters(), lr=self.cfg.lr_Gs)
         optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.cfg.lr_D)
         criterion_D = lambda d_D, d_gD: -torch.mean(torch.log(d_D) + torch.log(1 - d_gD))
         criterion_G = lambda d_gG: -torch.mean(torch.log(d_gG))
+        if self.hack_dict["label_smoothing"]:
+           criterion_D = lambda d_D, d_gD: -torch.mean(
+               torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.7))**2)) + 
+               torch.log(1 - torch.sqrt((d_gD - torch.rand_like(d_gD) * 0.7)**2))
+           )
+        if self.hack_dict["sup_loss"]:  
+            criterion_G = lambda d_gG, y_hat, y : -(
+                torch.mean(torch.log(d_gG)) - 
+                self.hack_dict["eta"] * torch.mean(
+                    torch.linalg.vector_norm(y_hat - y, dim=1)
+                    )
+            )
 
         pbar = tqdm.tqdm(range(self.cfg.n_epochs), disable=self.cfg.disable_tqdm)
         writer_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/tensorboard")
@@ -182,7 +228,7 @@ class SimpleGAN(GANBase):
                 scheduler_Gs = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_Gs, self.cfg.n_epochs)
                 scheduler_D = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_D, self.cfg.n_epochs)
             elif self.cfg.lr_scheduler == "exponential":
-                gamma = (1/10)**(1/self.cfg.n_epochs)
+                gamma = (1/5)**(1/self.cfg.n_epochs)
                 scheduler_Gs = torch.optim.lr_scheduler.ExponentialLR(optimizer_Gs, gamma=gamma)
                 scheduler_D = torch.optim.lr_scheduler.ExponentialLR(optimizer_D, gamma=gamma)
             elif self.cfg.lr_scheduler == "triangle2":
@@ -219,41 +265,41 @@ class SimpleGAN(GANBase):
                 initial=self.checkpoint_dict["epoch"] + 1,
             )
 
-        # noise_scale = 0.5
+        noise_scale = 1
         for epoch_n in pbar:
             epoch_loss_D = []
             epoch_loss_G = []
-            if epoch_n % self.window_size == 0:
-                training_data._unroll()
-            else:
-                training_data._roll(epoch_n % self.window_size)
-            dataloader = DataLoader(
-                training_data, 
-                batch_size = (self.window_size + self.cfg.batch_size) * self.cfg.k, 
-                drop_last = True, shuffle = False
-            )
-            for b_idx, (_, batch) in enumerate(dataloader): # ( _ , [(window+batch)*k, 1] )
+
+            for b_idx in range(0, len(X_train), self.cfg.batch_size):
+                batch_x = X_train[b_idx:b_idx + self.cfg.batch_size, :] # [batch, window]
+                batch_y = y_train[b_idx:b_idx + self.cfg.batch_size, :] # [batch, 1]
+                if len(batch_x) < self.cfg.batch_size:
+                    break
+
+                ### Training the discriminator ###
                 self.discriminator.train(True)
-                for k in range(self.cfg.k):
-                    k_batch_lst = []
-                    for b in range(self.cfg.batch_size):
-                        k_batch_lst.append(batch[k*(self.window_size + self.cfg.batch_size) + b : k*(self.window_size+self.cfg.batch_size) + b + self.window_size, :]) # [window, 1]
-                    k_batch = torch.stack(k_batch_lst, dim=1).squeeze().T # [batch, window]
 
-                    z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float32)  # [batch, window, 1]
-                    with torch.no_grad():
-                        # [batch, window, 1] -> [batch, window]
-                        g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
+                z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float32)  # [batch, window, 1]
+                with torch.no_grad():
+                    # [batch, window, 1] -> [batch, window]
+                    g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
+                # [batch, window] -> [batch]
+                d_gD = self.discriminator.forward(g_D)
+                
+                if self.hack_dict["noisy_input"]:
+                    noisy_batch_x = batch_x + noise_scale * torch.randn_like(batch_x)
                     # [batch, window] -> [batch]
-                    d_gD = self.discriminator.forward(g_D)
+                    d_D = self.discriminator.forward(noisy_batch_x)
+                else:
                     # [batch, window] -> [batch]
-                    # k_batch = k_batch + noise_scale * torch.randn_like(k_batch)
-                    d_D = self.discriminator.forward(k_batch)
-                    optimizer_D.zero_grad()
-                    loss_D = criterion_D(d_D, d_gD)
-                    loss_D.backward()
-                    optimizer_D.step()
+                    d_D = self.discriminator.forward(batch_x)
 
+                optimizer_D.zero_grad()
+                loss_D = criterion_D(d_D, d_gD)
+                loss_D.backward()
+                optimizer_D.step()
+
+                ### Training the generator ###
                 z_G = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float32)  # [batch, window, 1]
                 # [batch, window, 1] -> [batch, window]
                 g_G = self.seq_generator.forward(z_G)[0].squeeze(2)
@@ -261,8 +307,16 @@ class SimpleGAN(GANBase):
                 self.discriminator.train(False)
                 # [batch, window] -> [batch]
                 d_gG = self.discriminator.forward(g_G)
+
+                if self.hack_dict["sup_loss"]:
+                    batch_y_hat = self.generate(n_samples=self.cfg.batch_size, generation_len=1, og_scale=False, condit_seq_data=batch_x, training=True) # [batch, 1]    
+
                 optimizer_Gs.zero_grad()
-                loss_G = criterion_G(d_gG)
+
+                if self.hack_dict["sup_loss"]:
+                    loss_G = criterion_G(d_gG, batch_y_hat, batch_y)
+                else:
+                    loss_G = criterion_G(d_gG)
                 loss_G.backward()
 
                 if self.cfg.debug:
@@ -304,20 +358,46 @@ class SimpleGAN(GANBase):
                     "Gs_optim_state_dict": optimizer_Gs.state_dict(),
                     "D_optim_state_dict": optimizer_D.state_dict()
                 })
+            
+                if self.hack_dict["adaptive_lr"]:
+                    if eval_dict["Bin Difference"] < 0.15:
+                        optimizer_Gs.param_groups[0]['lr'] = 0.01 * self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = 0.01 * self.cfg.lr_D
+                    elif eval_dict["Bin Difference"] < 0.1:
+                        optimizer_Gs.param_groups[0]['lr'] = 0.05 * self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = 0.05 * self.cfg.lr_D
+                    elif eval_dict["Bin Difference"] < 0.25:
+                        optimizer_Gs.param_groups[0]['lr'] = 0.1 * self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = 0.1 * self.cfg.lr_D
+                    else:
+                        optimizer_Gs.param_groups[0]['lr'] = self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = self.cfg.lr_D
 
             if self.cfg.lr_scheduler:
                 scheduler_Gs.step()
                 scheduler_D.step()
             
-            # noise_scale = noise_scale * (1/100)**(1/self.cfg.n_epochs)
+            if self.hack_dict["noisy_input"]:
+                noise_scale = noise_scale * (1/100)**(1/self.cfg.n_epochs)
             
-            pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.4}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.4}")
+            if self.cfg.disable_tqdm:
+                if epoch_n % 100 == 0:
+                    print(f"ep: {epoch_n}")
+            else:
+                pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.4}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.4}")
 
         writer.flush()
         writer.close()
 
 
-    def generate(self, n_samples: int = 1, generation_len: int = None, og_scale: bool = True, condit_seq_data: torch.Tensor = None) -> torch.Tensor:
+    def generate(
+        self, 
+        n_samples: int = 1, 
+        generation_len: int = None, 
+        og_scale: bool = True, 
+        condit_seq_data: torch.Tensor = None, 
+        training: bool = False
+        ) -> torch.Tensor:
         """
         Generates data samples from the generator.
 
@@ -327,6 +407,7 @@ class SimpleGAN(GANBase):
             og_scale: whether to return the data on its original scale. If False, the data is returned in its scaled form
             condit_seq_data: sequential data tensor to condition the generator on of shape [1, 1...window_size] or [n_samples, 1...window_size].
                 if dim(0) = 1, the tensor is repeated n_samples times. This data must be scaled.
+            training: whether the generator is being used for training. If True, the generator is set to training mode
 
         Returns:
             a [n_samples x window_size] tensor of generated data
@@ -337,7 +418,7 @@ class SimpleGAN(GANBase):
         if generation_len > self.window_size:
             warnings.warn("Generation length is greater than the window size. Performance on generations beyond window size may be poor.")
 
-        self.seq_generator.train(False)
+        self.seq_generator.train(training)
 
         z_w = torch.randn(n_samples, generation_len, 1, dtype=torch.float32)  # [n_samples, generation_len, 1]
         

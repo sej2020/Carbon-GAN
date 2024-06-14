@@ -185,9 +185,9 @@ class QualEvaluation:
 if __name__ == "__main__":
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v57.2\checkpoints\checkpt_e59.pt")
-    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e399.pt")
-    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e999.pt")
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\CISO-hydro-vz45--58645\checkpoints\checkpt_e579.pt")
+    # model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e399.pt")
+    # model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e999.pt")
     dataset = CarbonDataset("CISO", "hydro", mode="test")
     qual = QualEvaluation(model1, dataset, 100)
     qual.plot_histograms()
