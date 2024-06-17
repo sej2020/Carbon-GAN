@@ -13,11 +13,11 @@ def setup_module():
         elec_source="hydro",
         n_epochs=5,
         batch_size=128,
-        lr_Gs=0.005,
-        lr_D=0.001,
-        k=1,
+        lr_Gs=5e-4,
+        lr_D=5e-4,
         run_name="TEMP_SIMPLE_GAN",
-        lr_scheduler=True,
+        lr_scheduler="adaptive",
+        sup_loss=True,
         disable_tqdm=True,
         logging_frequency=0.2,
         resume_from_cpt=False,
@@ -58,10 +58,10 @@ class TestQuantEvalSimpleGAN:
         assert type(result) == np.float64
         assert result >= 0.0 and result <= 1.0
 
-    def test_bin_difference(self, fpl_other_test_set):
+    def test_bin_overlap(self, fpl_other_test_set):
         gan = SimpleGAN(window_size=12, n_seq_gen_layers=1, cpt_path="logs/TEMP_SIMPLE_GAN/checkpoints/checkpt_e4.pt")
         quant_eval = QuantEvaluation(gan, fpl_other_test_set, 100)
-        result = quant_eval.bin_difference()
+        result = quant_eval.bin_overlap()
         assert type(result) == np.float64
         assert result >= 0.0 and result <= 1.0
     

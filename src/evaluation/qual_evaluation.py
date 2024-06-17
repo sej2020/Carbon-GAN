@@ -119,6 +119,7 @@ class QualEvaluation:
             pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
             fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_autocorr.png"
             plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
+            plt.clf()
         else:
             plt.show()
     
@@ -152,6 +153,7 @@ class QualEvaluation:
             pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
             fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_seq_hist.png"
             plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
+            plt.clf()
         else:
             plt.show() 
 
@@ -175,6 +177,7 @@ class QualEvaluation:
                 pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
                 fig_name = f"{self.dataset.region}_{self.dataset.elec_source}_meta_hist.png"
                 plt.savefig(pathlib.PurePath(save_dir) / fig_name, bbox_inches='tight')
+                plt.clf()
             else:
                 plt.show()
 
@@ -185,7 +188,7 @@ class QualEvaluation:
 if __name__ == "__main__":
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\CISO-hydro-vz45--58645\checkpoints\checkpt_e579.pt")
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\CISO-hydro-v69--91647\checkpoints\checkpt_e519.pt")
     # model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e399.pt")
     # model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v13\checkpoints\checkpt_e999.pt")
     dataset = CarbonDataset("CISO", "hydro", mode="test")

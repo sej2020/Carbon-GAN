@@ -4,7 +4,7 @@ with a model and dataset
 
 The QuantEvaluation class has the following methods:
 - Coverage - Ref: https://github.com/tolstikhin/adagan/blob/master/metrics.py
-- Bin Difference
+- Bin Overlap
 - Johnson Conditional Fidelity Estimate (JCFE)
 - Post-Hoc Discriminator Performance
 - Anomaly Detection Performance (train on generated, predict on real)
@@ -43,7 +43,9 @@ class QuantEvaluation:
 
     Methods:
         coverage: 'Computes the probability mass of the true data "covered" by the 95th quantile of the model density'
-        bin_difference: Calculates the average absolute difference between the bin values of the real and generated data
+        bin_overlap: Calculates the average overlap between the bin values of the real and generated data
+        jcfe: Calculates the Johnson Conditional Fidelity Estimate of the model
+        discriminator_accuracy: Trains a discriminator on sequences of real and generated data, and returns accuracy on a test set
     """
     def __init__(self, model, dataset, n_samples=1000):
         """
@@ -111,9 +113,9 @@ class QuantEvaluation:
             return C_meta, C_seq
 
 
-    def bin_difference(self, n_bins: int = 50) -> tuple[np.ndarray, np.float64] | np.float64:
+    def bin_overlap(self, n_bins: int = 50) -> tuple[np.ndarray, np.float64] | np.float64:
         """
-        Calculates the average absolute difference between the bin values of the real and generated sequential data (and metadata). 
+        Calculates the average overlap of the bin values of the real and generated sequential data (and metadata). 
         The bin values are calculated by histogramming the seq data (and metadata) into n_bins bins, and applying a density normalization
         to remove the effect of bin size and number of samples.
 
@@ -121,11 +123,11 @@ class QuantEvaluation:
             n_bins: The number of bins to use for the histogram
 
         Returns:
-            (diff_meta): The average absolute difference between the bin values of the real and generated metadata if model generates metadata
-            diff_seq: The average absolute difference between the bin values of the real and generated sequential data
+            (1-diff_meta): The average overlap of the bin values of the real and generated metadata if model generates metadata
+            1-diff_seq: The average overlap of the bin values of the real and generated sequential data
         
         Notes:
-            Lower bin difference values indicate better model performance
+            Higher bin overlap values indicate better model performance
         """
         gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy()
         real_seq = self.real_seq.detach().numpy()
@@ -146,12 +148,12 @@ class QuantEvaluation:
                 gen_vals = np.histogram(gen_meta[:, i], bins=bins, density=True)[0]
                 diff_meta[i] = np.mean(np.abs(real_vals - gen_vals))
 
-            return diff_meta, diff_seq
+            return 1-diff_meta, 1-diff_seq
         else:
-            return diff_seq
+            return 1-diff_seq
 
 
-    def jcfe(self, gen_per_sample: int = 100) -> float:
+    def jcfe(self, gen_per_sample: int = 100) -> np.float64:
         """
         Calculates the Johnson Conditional Fidelity Estimate of the model. A point x_t is sampled from real data, along with its preceding
         points x_t_minus. The model is then conditioned on x_t_minus to generate gen_per_sample x_t_hats. A model probability density function
@@ -189,7 +191,7 @@ class QuantEvaluation:
             return np.float64(jcfe)
 
 
-    def discriminator_accuracy(self):
+    def discriminator_accuracy(self) -> np.float64:
         """
         Trains a discriminator on sequences of real and generated data, and returns accuracy on a test set.
 
@@ -207,7 +209,7 @@ class QuantEvaluation:
             real_train_set[i] = sample.squeeze()
 
         train_set = torch.cat((gen_train_set, real_train_set), dim=0)
-        labels = torch.cat((torch.zeros(self.n_samples), torch.ones(self.n_samples)), dim=0)
+        labels = torch.cat((torch.zeros(self.n_samples, dtype=torch.float64), torch.ones(self.n_samples, dtype=torch.float64)), dim=0)
         train_perm = torch.randperm(train_set.size()[0])
         train_set = train_set[train_perm]
         labels = labels[train_perm]
@@ -226,7 +228,7 @@ class QuantEvaluation:
         test_set = test_set[test_perm]
         test_labels = test_labels[test_perm]
 
-        post_hoc_disc = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float32)
+        post_hoc_disc = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float64)
         criterion = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(post_hoc_disc.parameters(), lr=0.01)
         for epoch in range(500):
@@ -237,10 +239,6 @@ class QuantEvaluation:
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-            if epoch % 10 == 0:
-                print(f"Epoch: {epoch}, Training Loss: {loss.item()}")
-            if loss.item() < 0.34:
-                break
 
         with torch.no_grad():
             _, (h, _) = post_hoc_disc(test_set.unsqueeze(2))
@@ -256,9 +254,7 @@ class QuantEvaluation:
 if __name__ == '__main__':
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v57.2\checkpoints\checkpt_e59.pt")
-    model2 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v12\checkpoints\checkpt_e79.pt")
-    model3 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\debug\CISO-hydro-v12\checkpoints\checkpt_e79.pt")
-    dataset = CarbonDataset("CISO", "hydro", mode="test")
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\simple\AUS_QLD-coal--164242\checkpoints\checkpt_e39.pt")
+    dataset = CarbonDataset("AUS_QLD", "coal", mode="test")
     quant = QuantEvaluation(model1, dataset, 2000)
     print(quant.discriminator_accuracy())

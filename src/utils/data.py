@@ -36,7 +36,7 @@ class CarbonDataset(Dataset):
             region: The region from which the data is reported
             elec_source: The type of fuel/method for electricity generation
             train_size: The proportion of data to be used in the training set (remainder is the test set)
-            mode: The mode of the dataset: either "train", "test"
+            mode: The mode of the dataset: either "train", "val", or "test"
         """
         self.region = region
         self.elec_source = elec_source
@@ -44,6 +44,7 @@ class CarbonDataset(Dataset):
         self.mode = mode
         full_data = pd.read_csv(f"data/{region}/{region}_2019_clean.csv")
         self.train_idx = int(train_size * len(full_data))
+        self.val_idx = (len(full_data) - self.train_idx) // 2 + self.train_idx
 
         elec_source_data = full_data[elec_source].values
         metadata = self._preprocess_metadata(region)
@@ -59,14 +60,18 @@ class CarbonDataset(Dataset):
         if mode == "train":
             elec_source_data = elec_source_data[:self.train_idx]
             metadata = metadata[:self.train_idx]
-        elif mode == "test":
-            elec_source_data = elec_source_data[self.train_idx:]
-            metadata = metadata[self.train_idx:]
-        else:
-            raise ValueError("Mode must be one of 'train', or 'test'.")
         
-        self.full_metadata_set = torch.tensor(metadata, dtype=torch.float32)
-        self.full_seq_set = torch.tensor(elec_source_data, dtype=torch.float32)
+        elif mode == "val":
+            elec_source_data = elec_source_data[self.train_idx:self.val_idx]
+            metadata = metadata[self.train_idx:self.val_idx]
+        elif mode == "test":
+            elec_source_data = elec_source_data[self.val_idx:]
+            metadata = metadata[self.val_idx:]
+        else:
+            raise ValueError("Mode must be one of 'train', 'val', or 'test'.")
+        
+        self.full_metadata_set = torch.tensor(metadata, dtype=torch.float64)
+        self.full_seq_set = torch.tensor(elec_source_data, dtype=torch.float64)
         self.metadata = self.full_metadata_set
         self.seq_data = self.full_seq_set
 
