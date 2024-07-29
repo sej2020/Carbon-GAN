@@ -28,7 +28,7 @@ class CarbonDataset(Dataset):
         full_seq_set: The training or test set emissions data by region and electricity source
         seq_data: The emissions dataset by region and electricity source, perhaps truncated
     """
-    def __init__(self, region: str, elec_source: str, train_size: float = 0.7, mode: str = "train"):
+    def __init__(self, region: str, elec_source: str, train_size: float = 0.4, mode: str = "train"):
         """
         Initializes the CarbonDataset class. Performs normalization on the metadata and sequential data.
 

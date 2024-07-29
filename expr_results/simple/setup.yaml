@@ -1,0 +1,4 @@
+model_type: simple
+n_datasets: 10
+n_models: 7
+testing_sample_size: 1000

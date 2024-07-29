@@ -130,8 +130,9 @@ class SimpleGAN(GANBase):
     SimpleGAN is a GAN comprising an LSTM generator and an MLP discriminator
     
     Attributes:
+        disc_type: The type of discriminator to use. Options: "mlp", "lstm"
         seq_generator: An LSTM sequence generator
-        discriminator: An MLP discriminator
+        discriminator: An MLP/LSTM discriminator
         window_size: The size of the historical data used for the LSTM generator
         seq_scaler: The standard scaler object for the sequential data
         cfg: configuration for training
@@ -143,12 +144,14 @@ class SimpleGAN(GANBase):
             dropout_D_in: float = 0,
             dropout_D_hid: float = 0,
             cpt_path: str = None,
+            disc_type: str = "mlp"
         ):
         """
         Initializes Simple GAN model.
 
         Args:
             window_size: The size of the historical data used for the data generator
+            disc_type: The type of discriminator to use. Options: "mlp", "lstm"
             n_seq_gen_layers: The number of layers in the LSTM sequence data generator
             dropout_D_in: Dropout rate for the input layer of the discriminator
             dropout_D_hid: Dropout rate for the hidden layer of the discriminator
@@ -157,15 +160,24 @@ class SimpleGAN(GANBase):
                 checkpoint file
         """
         super().__init__()
+        self.disc_type = disc_type
+        if disc_type == "lstm" and (dropout_D_hid > 0 or dropout_D_in > 0):
+            warnings.warn("Cannot use discriminator dropout with LSTM discriminator. Dropout will be ignored.")
         self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, batch_first=True, dtype=torch.float64)
-        self.discriminator = torch.nn.Sequential(
-            torch.nn.Dropout(dropout_D_in),
-            torch.nn.Linear(window_size, 12, dtype=torch.float64),
-            torch.nn.LeakyReLU(),
-            torch.nn.Dropout(dropout_D_hid),
-            torch.nn.Linear(12, 1, dtype=torch.float64),
-            torch.nn.Sigmoid()
-        )
+        if disc_type == "lstm":
+            self.discriminator = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float64)
+            self.discriminator.prep_and_forward = lambda x: torch.sigmoid(
+                self.discriminator.forward(x.unsqueeze(2))[1][0].squeeze()
+                )
+        else:
+            self.discriminator = torch.nn.Sequential(
+                torch.nn.Dropout(dropout_D_in),
+                torch.nn.Linear(window_size, 12, dtype=torch.float64),
+                torch.nn.LeakyReLU(),
+                torch.nn.Dropout(dropout_D_hid),
+                torch.nn.Linear(12, 1, dtype=torch.float64),
+                torch.nn.Sigmoid()
+            )
         self.window_size = window_size
         if cpt_path:
             self.checkpoint_dict = torch.load(cpt_path)
@@ -216,6 +228,18 @@ class SimpleGAN(GANBase):
                     torch.linalg.vector_norm(y_hat - y, dim=1)
                     )
             )
+        # 2 sided label smoothing
+        # if self.cfg.label_smoothing:
+        #    criterion_D = lambda d_D, d_gD: -torch.mean(
+        #        torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.7))**2)) + 
+        #        torch.log(1 - torch.sqrt((d_gD - torch.rand_like(d_gD) * 0.7)**2))
+        #    )
+        # 1 sided label smoothing
+        if self.cfg.label_smoothing:
+           criterion_D = lambda d_D, d_gD: -torch.mean(
+               torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.3))**2)) + 
+               torch.log(1 - d_gD)
+           )
 
         pbar = tqdm.tqdm(range(self.cfg.n_epochs), disable=self.cfg.disable_tqdm)
         writer_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/tensorboard")
@@ -269,6 +293,8 @@ class SimpleGAN(GANBase):
 
         top_combined_score = 0
         epoch_at_top = 0
+
+        noise_scale = 0.5
         
         for epoch_n in pbar:
             epoch_loss_D = []
@@ -287,11 +313,25 @@ class SimpleGAN(GANBase):
                 with torch.no_grad():
                     # [batch, window, 1] -> [batch, window]
                     g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
-                # [batch, window] -> [batch]
-                d_gD = self.discriminator.forward(g_D)
+                if self.disc_type == "lstm":
+                    # [batch, window] -> [batch]
+                    d_gD = self.discriminator.prep_and_forward(g_D)
+                else:
+                    # [batch, window] -> [batch]
+                    d_gD = self.discriminator.forward(g_D)
                 
                 # [batch, window] -> [batch]
-                d_D = self.discriminator.forward(batch_x)
+                if self.cfg.noisy_input:
+                    noisy_batch_x = batch_x + noise_scale * torch.randn_like(batch_x)
+                    if self.disc_type == "lstm":
+                        d_D = self.discriminator.prep_and_forward(noisy_batch_x)
+                    else:
+                        d_D = self.discriminator.forward(noisy_batch_x)
+                else:
+                    if self.disc_type == "lstm":
+                        d_D = self.discriminator.prep_and_forward(batch_x)
+                    else:
+                        d_D = self.discriminator.forward(batch_x)
 
                 optimizer_D.zero_grad()
                 loss_D = criterion_D(d_D, d_gD)
@@ -305,7 +345,10 @@ class SimpleGAN(GANBase):
 
                 self.discriminator.train(False)
                 # [batch, window] -> [batch]
-                d_gG = self.discriminator.forward(g_G)
+                if self.disc_type == "lstm":
+                    d_gG = self.discriminator.prep_and_forward(g_G)
+                else:
+                    d_gG = self.discriminator.forward(g_G)
 
                 if self.cfg.sup_loss:
                     batch_y_hat = self.generate(n_samples=self.cfg.batch_size, generation_len=1, og_scale=False, condit_seq_data=batch_x, training=True) # [batch, 1]    
@@ -335,7 +378,11 @@ class SimpleGAN(GANBase):
                         with open(f"{hp_path}/error.txt", "a") as file:
                             file.write(f"Epoch {epoch_n}: {norm_name} is NaN\n")
 
-                eval_dict = self.evaluate()
+                try:
+                    eval_dict = self.evaluate()
+                except Exception as e:
+                    print(f"Error in evaluation: {e}")
+                    return f"{self.cfg.logging_dir}/{self.cfg.run_name}/", top_combined_score, epoch_at_top
                 writer.add_scalars(
                     "Training Loss", 
                     {"Generator" : sum(epoch_loss_G)/len(epoch_loss_G), "Discriminator": sum(epoch_loss_D)/len(epoch_loss_D)}, 
@@ -359,15 +406,15 @@ class SimpleGAN(GANBase):
                     epoch_at_top = epoch_n
             
                 if self.cfg.lr_scheduler == "adaptive":
-                    if eval_dict["Bin Overlap"] > 0.9:
-                        optimizer_Gs.param_groups[0]['lr'] = 0.01 * self.cfg.lr_Gs
-                        optimizer_D.param_groups[0]['lr'] = 0.01 * self.cfg.lr_D
-                    elif eval_dict["Bin Overlap"] > 0.825:
-                        optimizer_Gs.param_groups[0]['lr'] = 0.05 * self.cfg.lr_Gs
-                        optimizer_D.param_groups[0]['lr'] = 0.05 * self.cfg.lr_D
-                    elif eval_dict["Bin Overlap"] > 0.75:
+                    if eval_dict["Bin Overlap"] > 0.8:
                         optimizer_Gs.param_groups[0]['lr'] = 0.1 * self.cfg.lr_Gs
                         optimizer_D.param_groups[0]['lr'] = 0.1 * self.cfg.lr_D
+                    elif eval_dict["Bin Overlap"] > 0.7:
+                        optimizer_Gs.param_groups[0]['lr'] = 0.25 * self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = 0.25 * self.cfg.lr_D
+                    elif eval_dict["Bin Overlap"] > 0.6:
+                        optimizer_Gs.param_groups[0]['lr'] = 0.5 * self.cfg.lr_Gs
+                        optimizer_D.param_groups[0]['lr'] = 0.5 * self.cfg.lr_D
                     else:
                         optimizer_Gs.param_groups[0]['lr'] = self.cfg.lr_Gs
                         optimizer_D.param_groups[0]['lr'] = self.cfg.lr_D
@@ -375,6 +422,9 @@ class SimpleGAN(GANBase):
             if self.cfg.lr_scheduler and self.cfg.lr_scheduler != "adaptive":
                 scheduler_Gs.step()
                 scheduler_D.step()
+            
+            if self.cfg.noisy_input:
+                noise_scale = noise_scale * (1/100)**(1/self.cfg.n_epochs)
             
             if self.cfg.disable_tqdm:
                 if epoch_n % 100 == 0:
@@ -469,10 +519,15 @@ class SimpleGAN(GANBase):
         for weight in self.seq_generator.all_weights[0]:
             grad_mag_seq += torch.norm(weight.grad).item()
             wgt_mag_seq += torch.norm(weight).item()
-        for layer in self.discriminator:
-            if hasattr(layer, "weight"):
-                grad_mag_disc += torch.norm(layer.weight.grad).item()
-                wgt_mag_disc += torch.norm(layer.weight).item()
+        if self.disc_type == "lstm":
+            for weight in self.discriminator.all_weights[0]:
+                grad_mag_disc += torch.norm(weight.grad).item()
+                wgt_mag_disc += torch.norm(weight).item()
+        else:
+            for layer in self.discriminator:
+                if hasattr(layer, "weight"):
+                    grad_mag_disc += torch.norm(layer.weight.grad).item()
+                    wgt_mag_disc += torch.norm(layer.weight).item()
         
         return {
             "grad_mag_seq": grad_mag_seq,

@@ -52,11 +52,15 @@ parser.add_argument("--lr_scheduler", type=str, default=None, choices=["cosine",
 parser.add_argument("--sup_loss", action=argparse.BooleanOptionalAction, default=False, help="Whether to use supervised training for the generator")
 parser.add_argument("--eta", type=float, default=1, help="tuning supervised loss influence on generator")
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=False)
-parser.add_argument("--logging_frequency", type=float, default=0.1)
+parser.add_argument("--logging_frequency", type=float, default=0.05)
 parser.add_argument("--resume_from_cpt", type=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--cpt_path", type=str, default=None)
 
 parser.add_argument("--n_jobs", type=int, default=1, help="How many runs to execute in parallel")
+
+# could be temporary
+parser.add_argument("--label_smoothing", action=argparse.BooleanOptionalAction, default=False)
+parser.add_argument("--noisy_input", action=argparse.BooleanOptionalAction, default=False)
 
 args = parser.parse_args()
 

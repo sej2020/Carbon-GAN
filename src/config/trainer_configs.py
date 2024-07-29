@@ -21,7 +21,10 @@ class TrainerConfig:
         logging_frequency = 0.1,
         resume_from_cpt = False,
         cpt_path = None,
-        debug = False
+        debug = False,
+        # could be temporary
+        label_smoothing = False,
+        noisy_input = False,
     ):
         """
         Configuration for training a simple GAN.
@@ -63,6 +66,9 @@ class TrainerConfig:
         self.resume_from_cpt = resume_from_cpt
         self.cpt_path = cpt_path
         self.debug = debug
+        # could be temporary
+        self.label_smoothing = label_smoothing
+        self.noisy_input = noisy_input
 
     def __str__(self):
         return f"""TrainerConfig(

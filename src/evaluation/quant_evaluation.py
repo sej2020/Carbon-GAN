@@ -136,21 +136,12 @@ class QuantEvaluation:
         bins = np.linspace(real_seq.min(), real_seq.max(), n_bins)
         real_vals = np.histogram(real_seq, bins=bins, density=True)[0]
         gen_vals = np.histogram(gen_seq, bins=bins, density=True)[0]
-        diff_seq = np.mean(np.abs(real_vals - gen_vals))
-
+        diff_seq = np.sum(np.abs(real_vals - gen_vals)) / 2
         if self.model.generates_metadata:
-            gen_meta = self.gen_meta.detach().numpy()
-            real_meta = self.real_meta.detach().numpy()
-            diff_meta = np.zeros(real_meta.shape[1])
-            for i in range(real_meta.shape[1]):
-                bins = np.linspace(real_meta[:, i].min(), real_meta[:, i].max(), n_bins)
-                real_vals = np.histogram(real_meta[:, i], bins=bins, density=True)[0]
-                gen_vals = np.histogram(gen_meta[:, i], bins=bins, density=True)[0]
-                diff_meta[i] = np.mean(np.abs(real_vals - gen_vals))
-
-            return 1-diff_meta, 1-diff_seq
+            pass
+            # TODO: Implement metadata bin overlap
         else:
-            return 1-diff_seq
+            return 1-(diff_seq/sum(real_vals))
 
 
     def jcfe(self, gen_per_sample: int = 100) -> np.float64:
@@ -254,7 +245,7 @@ class QuantEvaluation:
 if __name__ == '__main__':
     from src.models.GANs import SimpleGAN
     from src.utils.data import CarbonDataset
-    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\simple\AUS_QLD-coal--164242\checkpoints\checkpt_e39.pt")
-    dataset = CarbonDataset("AUS_QLD", "coal", mode="test")
-    quant = QuantEvaluation(model1, dataset, 2000)
-    print(quant.discriminator_accuracy())
+    model1 = SimpleGAN(window_size=24, n_seq_gen_layers=1, cpt_path="logs\CISO-hydro-2024-06-18_11-40-32--64176\checkpoints\checkpt_e199.pt")
+    dataset = CarbonDataset("CISO", "nat_gas", mode="val")
+    quant = QuantEvaluation(model1, dataset, 1000)
+    print(quant.bin_overlap())

@@ -1,0 +1,103 @@
+AUS_QLD-coal:
+  bin_overlap: 0.5021717532330763
+  coverage: 0.45545305193984587
+  disc_acc: 0.972
+  jcfe: 0.3662554205606838
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    BnCoUkYn8D8=
+BPAT-nuclear:
+  bin_overlap: 0.6916333091545916
+  coverage: 0.6713003917603944
+  disc_acc: 0.586
+  jcfe: 0.7539492036076205
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    4GPaSayr+z8=
+CISO-nat_gas:
+  bin_overlap: 0.6380429409410675
+  coverage: 0.6855806900037913
+  disc_acc: 0.795
+  jcfe: 0.5119675207683448
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    QV7Uk7nn8z8=
+DE-geothermal:
+  bin_overlap: 0.30497856479135
+  coverage: 0.60022807906741
+  disc_acc: 0.6
+  jcfe: 0.5714389059864823
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    XFRDGiMZ8D8=
+ERCO-solar:
+  bin_overlap: 0.5727284215847342
+  coverage: 0.5555415139643625
+  disc_acc: 0.99
+  jcfe: 0.41563950388888826
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    EXdtUZ/A8j8=
+ES-biomass:
+  bin_overlap: 0.1735119423733099
+  coverage: 0.1464678377353722
+  disc_acc: 0.566
+  jcfe: 0.21902336442949774
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    LomPAj3d5z8=
+FPL-other:
+  bin_overlap: 0.44456230254012363
+  coverage: 0.4822444079363073
+  disc_acc: 0.5
+  jcfe: 0.5767405695242694
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    3Nw7zwL77j8=
+ISNE-hydro:
+  bin_overlap: 0.5051186444247862
+  coverage: 0.558700871982813
+  disc_acc: 0.77
+  jcfe: 0.4664565586550333
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    0DwvxgOV7z8=
+NL-wind:
+  bin_overlap: 0.45305193984582337
+  coverage: 0.47162896499431317
+  disc_acc: 0.874
+  jcfe: 0.39846415701899635
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    igB6zhAR8D8=
+NYISO-oil:
+  bin_overlap: 0.4841471313029191
+  coverage: 0.9378238341968912
+  disc_acc: 0.826
+  jcfe: 0.6825855230290425
+  training_combined_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    9fU59ym/8z8=
