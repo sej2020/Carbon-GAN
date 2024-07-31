@@ -21,6 +21,7 @@ parser = argparse.ArgumentParser(description='Multi-dataset GAN experiment')
 parser.add_argument("model_type", type=str, choices=["simple"], help="Model to train")
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument("--logging_frequency", type=float, default=0.05)
+parser.add_argument("--saving_frequency", type=float, default=0.05)
 parser.add_argument("--n_jobs", type=int, default=1)
 
 args = parser.parse_args()
@@ -58,6 +59,7 @@ if __name__ == "__main__":
                 disable_tqdm=args.disable_tqdm,
                 logging_dir="logs/simple",
                 logging_frequency=args.logging_frequency,
+                saving_frequency=args.saving_frequency,
             )
             if args.n_jobs > 1:
                 with mp.Pool(args.n_jobs) as pool:

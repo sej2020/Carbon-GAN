@@ -8,9 +8,11 @@ import tqdm
 from src.utils.data import CarbonDataset
 from src.config.trainer_configs import TrainerConfig
 from src.evaluation.quant_evaluation import QuantEvaluation
+from src.utils.stat_algos import ewmv
 from torch.utils.tensorboard import SummaryWriter
 from joblib import dump, load
 import warnings
+import wandb
 
 torch.set_printoptions(sci_mode=False)
 
@@ -127,7 +129,7 @@ class GANBase(torch.nn.Module):
 
 class SimpleGAN(GANBase):
     """
-    SimpleGAN is a GAN comprising an LSTM generator and an MLP discriminator
+    SimpleGAN is a GAN comprising an LSTM generator and an MLP (or LSTM) discriminator
     
     Attributes:
         disc_type: The type of discriminator to use. Options: "mlp", "lstm"
@@ -143,27 +145,36 @@ class SimpleGAN(GANBase):
             n_seq_gen_layers: int,
             dropout_D_in: float = 0,
             dropout_D_hid: float = 0,
+            dropout_Gs: float = 0,
             cpt_path: str = None,
-            disc_type: str = "mlp"
+            disc_type: str = "mlp",
+            disc_hidden_dim: int = 12
         ):
         """
         Initializes Simple GAN model.
 
         Args:
             window_size: The size of the historical data used for the data generator
-            disc_type: The type of discriminator to use. Options: "mlp", "lstm"
             n_seq_gen_layers: The number of layers in the LSTM sequence data generator
-            dropout_D_in: Dropout rate for the input layer of the discriminator
-            dropout_D_hid: Dropout rate for the hidden layer of the discriminator
+            dropout_D_in: Dropout rate for the input layer of the MLP discriminator
+            dropout_D_hid: Dropout rate for the hidden layer of the MLP discriminator
+            dropout_Gs: Dropout rate for the LSTM sequence data generator
             cpt_path: path to a checkpoint file to use for weights initialization. If None, weights are initialized randomly.
                 scalers must be in a folder called 'scalers' in the same directory as the folder 'checkpoints' containing the 
                 checkpoint file
+            disc_type: The type of discriminator to use. Options: "mlp", "lstm"
+            disc_hidden_dim: The hidden dimension of the MLP discriminator
         """
         super().__init__()
         self.disc_type = disc_type
-        if disc_type == "lstm" and (dropout_D_hid > 0 or dropout_D_in > 0):
-            warnings.warn("Cannot use discriminator dropout with LSTM discriminator. Dropout will be ignored.")
-        self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, batch_first=True, dtype=torch.float64)
+        if disc_type == "lstm":
+            if dropout_D_hid > 0 or dropout_D_in > 0:
+                warnings.warn("Cannot use discriminator dropout with LSTM discriminator. Dropout will be ignored.")
+            if disc_hidden_dim != 12:
+                warnings.warn("Cannot use hidden dim with LSTM discriminator. Hidden dim parameter will be ignored.")
+
+        self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, dropout=dropout_Gs, batch_first=True, dtype=torch.float64)
+        
         if disc_type == "lstm":
             self.discriminator = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float64)
             self.discriminator.prep_and_forward = lambda x: torch.sigmoid(
@@ -172,10 +183,10 @@ class SimpleGAN(GANBase):
         else:
             self.discriminator = torch.nn.Sequential(
                 torch.nn.Dropout(dropout_D_in),
-                torch.nn.Linear(window_size, 12, dtype=torch.float64),
+                torch.nn.Linear(window_size, disc_hidden_dim, dtype=torch.float64),
                 torch.nn.LeakyReLU(),
                 torch.nn.Dropout(dropout_D_hid),
-                torch.nn.Linear(12, 1, dtype=torch.float64),
+                torch.nn.Linear(disc_hidden_dim, 1, dtype=torch.float64),
                 torch.nn.Sigmoid()
             )
         self.window_size = window_size
@@ -190,7 +201,7 @@ class SimpleGAN(GANBase):
             self.seq_scaler = load(f"{pathlib.Path(cpt_path).parent.parent}/scalers/seq_scaler.joblib")
 
 
-    def train(self, cfg: TrainerConfig) -> tuple[str, np.float64, int]:
+    def train(self, cfg=None, hp_search=False) -> tuple[str, np.float64, int]:
         """
         Trains the GAN model. To view the training progress, run the following command in the terminal:
         ```bash
@@ -199,7 +210,8 @@ class SimpleGAN(GANBase):
         Clean up the logs directory after training is complete.
 
         Args:
-            cfg: configuration for training
+            cfg: TrainerConfig object OR dictionary of training hyperparameters if hp_search is True.
+            hp_search: whether this fine-tuning run is a part of a wandb hyperparameter search. Default is False.
         
         Returns:
             a tuple containing the path to the logging directory, the top combined evaluation score, and the epoch at which the top combined score was achieved
@@ -207,10 +219,13 @@ class SimpleGAN(GANBase):
         # Notes on variable naming scheme:
         # z: noise, g: passed through generator, d: passed through discriminator
         # G: relevant to training generator, D: relevant to training discriminator
-        self.cfg = cfg
-
-        # writing out a text file to the logging directory with the string of the trainer config
+        
+        if hp_search:
+            wandb.init(project="search-hp-SimpleGAN", config=cfg)
+        self.cfg = wandb.config if hp_search else cfg
+        
         hp_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}")
+        # writing out a text file to the logging directory with the string of the trainer config
         hp_path.mkdir(parents=True, exist_ok=True)
         with open(f"{hp_path}/trainer_config.txt", "w") as file:
             file.write(str(self.cfg))
@@ -219,7 +234,6 @@ class SimpleGAN(GANBase):
 
         optimizer_Gs = torch.optim.Adam(self.seq_generator.parameters(), lr=self.cfg.lr_Gs)
         optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.cfg.lr_D)
-        criterion_D = lambda d_D, d_gD: -torch.mean(torch.log(d_D) + torch.log(1 - d_gD))
         criterion_G = lambda d_gG: -torch.mean(torch.log(d_gG))
         if self.cfg.sup_loss:  
             criterion_G = lambda d_gG, y_hat, y : -(
@@ -228,24 +242,30 @@ class SimpleGAN(GANBase):
                     torch.linalg.vector_norm(y_hat - y, dim=1)
                     )
             )
+
         # 2 sided label smoothing
-        # if self.cfg.label_smoothing:
-        #    criterion_D = lambda d_D, d_gD: -torch.mean(
-        #        torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.7))**2)) + 
-        #        torch.log(1 - torch.sqrt((d_gD - torch.rand_like(d_gD) * 0.7)**2))
-        #    )
+        if self.cfg.label_smoothing == 2:
+           criterion_D = lambda d_D, d_gD: -torch.mean(
+               torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.7))**2)) + 
+               torch.log(1 - torch.sqrt((d_gD - torch.rand_like(d_gD) * 0.7)**2))
+           )
         # 1 sided label smoothing
-        if self.cfg.label_smoothing:
+        elif self.cfg.label_smoothing == 1:
            criterion_D = lambda d_D, d_gD: -torch.mean(
                torch.log(1 - torch.sqrt((d_D - (1 - torch.rand_like(d_D) * 0.3))**2)) + 
                torch.log(1 - d_gD)
            )
+        # no label smoothing
+        else:
+            criterion_D = lambda d_D, d_gD: -torch.mean(torch.log(d_D) + torch.log(1 - d_gD))
 
         pbar = tqdm.tqdm(range(self.cfg.n_epochs), disable=self.cfg.disable_tqdm)
-        writer_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/tensorboard")
-        writer_path.mkdir(parents=True, exist_ok=True)
-        writer = SummaryWriter(log_dir=writer_path)
+        if not hp_search:
+            writer_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}/tensorboard")
+            writer_path.mkdir(parents=True, exist_ok=True)
+            writer = SummaryWriter(log_dir=writer_path)
         logging_steps = int(1 / self.cfg.logging_frequency)
+        saving_steps = int(1 / self.cfg.saving_frequency)
 
         if self.cfg.lr_scheduler is not None:
             if self.cfg.lr_scheduler == "cosine":
@@ -371,6 +391,22 @@ class SimpleGAN(GANBase):
                 epoch_loss_D.append(loss_D.item())
                 epoch_loss_G.append(loss_G.item())
 
+            if hp_search:
+                wandb.log({"gen_train_loss": sum(epoch_loss_G)/len(epoch_loss_G), "epoch": epoch_n})
+                wandb.log({"disc_train_loss": sum(epoch_loss_D)/len(epoch_loss_D), "epoch": epoch_n})
+                # training stability metric (Exponentially weighted moving variance)
+                if epoch_n == 0:
+                    ewmv_loss_G = 0
+                    ewmv_loss_D = 0
+                    ewma_loss_G = sum(epoch_loss_G)/len(epoch_loss_G)
+                    ewma_loss_D = sum(epoch_loss_D)/len(epoch_loss_D)
+                else:
+                    ewma_loss_G, ewmv_loss_G = ewmv(sum(epoch_loss_G)/len(epoch_loss_G), ewma_loss_G, ewmv_loss_G)
+                    ewma_loss_D, ewmv_loss_D = ewmv(sum(epoch_loss_D)/len(epoch_loss_D), ewma_loss_D, ewmv_loss_D)
+                if epoch_n >= self.cfg.n_epochs / 10:
+                    wandb.log({"ewmv_loss_G": ewmv_loss_G, "epoch": epoch_n})
+                    wandb.log({"ewmv_loss_D": ewmv_loss_D, "epoch": epoch_n})
+                    wandb.log({"ewmv_combined": (ewmv_loss_G + ewmv_loss_D)/2, "epoch": epoch_n})
 
             if (epoch_n+1) % logging_steps == 0:
                 for norm_name, norm in self.monitor_weights().items():
@@ -383,24 +419,22 @@ class SimpleGAN(GANBase):
                 except Exception as e:
                     print(f"Error in evaluation: {e}")
                     return f"{self.cfg.logging_dir}/{self.cfg.run_name}/", top_combined_score, epoch_at_top
-                writer.add_scalars(
-                    "Training Loss", 
-                    {"Generator" : sum(epoch_loss_G)/len(epoch_loss_G), "Discriminator": sum(epoch_loss_D)/len(epoch_loss_D)}, 
-                    epoch_n
-                    )
-                writer.add_scalars(
-                    "Evaluation Metrics", 
-                    {"Bin Overlap": eval_dict["Bin Overlap"], "Coverage": eval_dict["Coverage"], "JCFE": eval_dict["JCFE"]},
-                    epoch_n
-                    )
-                self._save_checkpoint({
-                    "epoch": epoch_n,
-                    "Gs_state_dict": self.seq_generator.state_dict(),
-                    "D_state_dict": self.discriminator.state_dict(),
-                    "Gs_optim_state_dict": optimizer_Gs.state_dict(),
-                    "D_optim_state_dict": optimizer_D.state_dict()
-                })
-
+                if hp_search:
+                    wandb.log({"bin_overlap": eval_dict["Bin Overlap"], "epoch": epoch_n})
+                    wandb.log({"coverage": eval_dict["Coverage"], "epoch": epoch_n})
+                    wandb.log({"jcfe": eval_dict["JCFE"], "epoch": epoch_n})
+                else:
+                    writer.add_scalars(
+                        "Training Loss", 
+                        {"Generator" : sum(epoch_loss_G)/len(epoch_loss_G), "Discriminator": sum(epoch_loss_D)/len(epoch_loss_D)}, 
+                        epoch_n
+                        )
+                    writer.add_scalars(
+                        "Evaluation Metrics", 
+                        {"Bin Overlap": eval_dict["Bin Overlap"], "Coverage": eval_dict["Coverage"], "JCFE": eval_dict["JCFE"]},
+                        epoch_n
+                        )
+    
                 top_combined_score = max(top_combined_score, (eval_dict["Bin Overlap"] + eval_dict["Coverage"]*0.5 + eval_dict["JCFE"]*0.5))
                 if top_combined_score == (eval_dict["Bin Overlap"] + eval_dict["Coverage"]*0.5 + eval_dict["JCFE"]*0.5):
                     epoch_at_top = epoch_n
@@ -418,7 +452,17 @@ class SimpleGAN(GANBase):
                     else:
                         optimizer_Gs.param_groups[0]['lr'] = self.cfg.lr_Gs
                         optimizer_D.param_groups[0]['lr'] = self.cfg.lr_D
-
+            
+            if not hp_search:
+                if (epoch_n+1) % saving_steps == 0:
+                    self._save_checkpoint({
+                        "epoch": epoch_n,
+                        "Gs_state_dict": self.seq_generator.state_dict(),
+                        "D_state_dict": self.discriminator.state_dict(),
+                        "Gs_optim_state_dict": optimizer_Gs.state_dict(),
+                        "D_optim_state_dict": optimizer_D.state_dict()
+                    })
+                
             if self.cfg.lr_scheduler and self.cfg.lr_scheduler != "adaptive":
                 scheduler_Gs.step()
                 scheduler_D.step()
@@ -432,8 +476,11 @@ class SimpleGAN(GANBase):
             else:
                 pbar.set_description(f"Disc. Loss: {sum(epoch_loss_D)/len(epoch_loss_D):.4}, Gen. Loss: {sum(epoch_loss_G)/len(epoch_loss_G):.4}")
 
-        writer.flush()
-        writer.close()
+        if hp_search:
+            wandb.finish()
+        else:
+            writer.flush()
+            writer.close()
 
         return f"{self.cfg.logging_dir}/{self.cfg.run_name}/", top_combined_score, epoch_at_top
 

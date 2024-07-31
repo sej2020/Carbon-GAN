@@ -19,6 +19,7 @@ class TrainerConfig:
         disable_tqdm = False,
         logging_dir = "logs",
         logging_frequency = 0.1,
+        saving_frequency = 0.1,
         resume_from_cpt = False,
         cpt_path = None,
         debug = False,
@@ -42,7 +43,8 @@ class TrainerConfig:
             eta: The weight of the supervised loss
             disable_tqdm: Whether to disable progress bar
             logging_dir: The directory to save the logs
-            logging_frequency: how often to evaluate the model on the test set, log the training metrics, and save the model 
+            logging_frequency: how often to evaluate the model on the test set, log the training metrics, and save the model
+            saving_frequency: how often to save the model 
             resume_from_cpt: Whether to resume training from a checkpoint
             cpt_path: The path to the checkpoint to resume training from
             debug: Whether to run in debug mode, activating print statements monitoring the model loss and gradients
@@ -63,6 +65,7 @@ class TrainerConfig:
         self.disable_tqdm = disable_tqdm
         self.logging_dir = logging_dir
         self.logging_frequency = logging_frequency
+        self.saving_frequency = saving_frequency
         self.resume_from_cpt = resume_from_cpt
         self.cpt_path = cpt_path
         self.debug = debug
@@ -77,6 +80,7 @@ class TrainerConfig:
         Region: {self.region}, Electricity Source: {self.elec_source}, Number of Epochs: {self.n_epochs}, 
         Batch Size: {self.batch_size}, Learning Rates (Gs, D): ({self.lr_Gs}, {self.lr_D}), Learning Rate Scheduler: {self.lr_scheduler},
         Sup Loss: {self.sup_loss}, Eta: {self.eta}, Logging Directory: {self.logging_dir}, 
-        Logging Frequency: {self.logging_frequency}, Resume from Checkpoint: {self.resume_from_cpt}, Checkpoint Path: {self.cpt_path}
+        (Logging, Saving) Frequency: {self.logging_frequency},{self.saving_frequency}, Resume from Checkpoint: {self.resume_from_cpt}, 
+        Checkpoint Path: {self.cpt_path}
         )
         """

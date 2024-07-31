@@ -53,6 +53,7 @@ parser.add_argument("--sup_loss", action=argparse.BooleanOptionalAction, default
 parser.add_argument("--eta", type=float, default=1, help="tuning supervised loss influence on generator")
 parser.add_argument("--disable_tqdm", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--logging_frequency", type=float, default=0.05)
+parser.add_argument("--saving_frequency", type=float, default=0.05)
 parser.add_argument("--resume_from_cpt", type=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--cpt_path", type=str, default=None)
 
@@ -91,6 +92,7 @@ if args.model_type == "simple":
         disable_tqdm=args.disable_tqdm,
         logging_dir=LOGGING_DIR,
         logging_frequency=args.logging_frequency,
+        saving_frequency=args.saving_frequency,
         resume_from_cpt=args.resume_from_cpt,
         cpt_path=args.cpt_path,
         debug=args.debug
