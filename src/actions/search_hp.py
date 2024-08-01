@@ -80,7 +80,7 @@ hp_search_trainer_config = {
     'region': {'value': args.region},
     'elec_source': {'value': args.elec_source},
     'n_epochs': {
-        'distribution': 'uniform',
+        'distribution': 'int_uniform',
         'max': 1600,
         'min': 400
         },
@@ -101,8 +101,8 @@ hp_search_trainer_config = {
     'logging_frequency': {'value': args.logging_frequency},
     'saving_frequency': {'value': args.saving_frequency},
     'disable_tqdm': {'value': args.disable_tqdm},
-    'resume_from_checkpoint': {'value': args.resume_from_checkpoint},
-    'checkpoint_path': {'value': args.checkpoint_path},
+    'resume_from_cpt': {'value': args.resume_from_cpt},
+    'cpt_path': {'value': args.cpt_path},
     'run_name': {'value': NAME},
     ############################################
     'label_smoothing': {
@@ -120,18 +120,14 @@ hp_search_trainer_config = {
         },
     'eta': {
         'values': [0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4]
-        },  
+        },
+    'debug': {'value': args.debug},
+    'device': {'value': args.device}
 }
 
-sweep_config = {
-    'method': 'random'
-}
-
-sweep_config['parameters'] = hp_search_trainer_config
-
-sweep_id = wandb.sweep(sweep_config, project="search-hp-SimpleGAN")
-
-def setup_and_train(config=None):
+def setup_and_train(cfg=None):
+    wandb.init(project="search-hp-SimpleGAN")
+    config = wandb.config
     GAN = SimpleGAN(
         window_size=config.window_size,
         n_seq_gen_layers=config.n_seq_gen_layers,
@@ -140,9 +136,16 @@ def setup_and_train(config=None):
         dropout_Gs=config.dropout_Gs,
         disc_type=config.disc_type,
         disc_hidden_dim=config.disc_hidden_dim,
+        device=config.device,
         )
     GAN.train(cfg=config, hp_search=True)
 
-wandb.agent(sweep_id, function=setup_and_train(), count=args.n_runs)
+sweep_config = {
+    'method': 'random'
+}
+
+sweep_config['parameters'] = hp_search_trainer_config
+sweep_id = wandb.sweep(sweep_config, project="search-hp-SimpleGAN")
+wandb.agent(sweep_id, function=lambda: setup_and_train(), project="search-hp-SimpleGAN", count=args.n_runs)
 
 print(f"Hyperparameter Search complete for {NAME}", flush=True)

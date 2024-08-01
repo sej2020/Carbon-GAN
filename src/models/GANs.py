@@ -27,8 +27,9 @@ class GANBase(torch.nn.Module):
         generates_metadata: whether the model generates metadata
         seq_scaler: standard scaler object for the sequential data
         cfg: configuration for training
+        device: device on which to run the model
     """
-    def __init__(self):
+    def __init__(self, device="cpu"):
         """
         Initializes the GAN model.
         """
@@ -39,6 +40,7 @@ class GANBase(torch.nn.Module):
         self.generates_metadata = False
         self.seq_scaler = None
         self.cfg = None
+        self.device = device
     
 
     def train(self, cfg):
@@ -137,7 +139,8 @@ class SimpleGAN(GANBase):
         discriminator: An MLP/LSTM discriminator
         window_size: The size of the historical data used for the LSTM generator
         seq_scaler: The standard scaler object for the sequential data
-        cfg: configuration for training
+        cfg: configuration for training,
+        device: device on which to run the model
     """
     def __init__(
             self,
@@ -148,7 +151,8 @@ class SimpleGAN(GANBase):
             dropout_Gs: float = 0,
             cpt_path: str = None,
             disc_type: str = "mlp",
-            disc_hidden_dim: int = 12
+            disc_hidden_dim: int = 12,
+            device="cpu"
         ):
         """
         Initializes Simple GAN model.
@@ -164,8 +168,9 @@ class SimpleGAN(GANBase):
                 checkpoint file
             disc_type: The type of discriminator to use. Options: "mlp", "lstm"
             disc_hidden_dim: The hidden dimension of the MLP discriminator
+            device: device on which to run the model
         """
-        super().__init__()
+        super().__init__(device=device)
         self.disc_type = disc_type
         if disc_type == "lstm":
             if dropout_D_hid > 0 or dropout_D_in > 0:
@@ -173,15 +178,16 @@ class SimpleGAN(GANBase):
             if disc_hidden_dim != 12:
                 warnings.warn("Cannot use hidden dim with LSTM discriminator. Hidden dim parameter will be ignored.")
 
-        self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, dropout=dropout_Gs, batch_first=True, dtype=torch.float64)
+        self.seq_generator = torch.nn.LSTM(1, hidden_size=1, num_layers=n_seq_gen_layers, dropout=dropout_Gs, batch_first=True, dtype=torch.float64, device=device)
         
         if disc_type == "lstm":
-            self.discriminator = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float64)
+            discriminator = torch.nn.LSTM(1, hidden_size=1, batch_first=True, dtype=torch.float64, device=device)
+            self.discriminator = discriminator.to(device)
             self.discriminator.prep_and_forward = lambda x: torch.sigmoid(
                 self.discriminator.forward(x.unsqueeze(2))[1][0].squeeze()
                 )
         else:
-            self.discriminator = torch.nn.Sequential(
+            discriminator = torch.nn.Sequential(
                 torch.nn.Dropout(dropout_D_in),
                 torch.nn.Linear(window_size, disc_hidden_dim, dtype=torch.float64),
                 torch.nn.LeakyReLU(),
@@ -189,6 +195,7 @@ class SimpleGAN(GANBase):
                 torch.nn.Linear(disc_hidden_dim, 1, dtype=torch.float64),
                 torch.nn.Sigmoid()
             )
+            self.discriminator = discriminator.to(device)
         self.window_size = window_size
         if cpt_path:
             self.checkpoint_dict = torch.load(cpt_path)
@@ -220,9 +227,7 @@ class SimpleGAN(GANBase):
         # z: noise, g: passed through generator, d: passed through discriminator
         # G: relevant to training generator, D: relevant to training discriminator
         
-        if hp_search:
-            wandb.init(project="search-hp-SimpleGAN", config=cfg)
-        self.cfg = wandb.config if hp_search else cfg
+        self.cfg = cfg
         
         hp_path = pathlib.Path(f"{self.cfg.logging_dir}/{self.cfg.run_name}")
         # writing out a text file to the logging directory with the string of the trainer config
@@ -231,6 +236,8 @@ class SimpleGAN(GANBase):
             file.write(str(self.cfg))
 
         X_train, y_train = self.prepare_data()
+        X_train = X_train.to(self.device)
+        y_train = y_train.to(self.device)
 
         optimizer_Gs = torch.optim.Adam(self.seq_generator.parameters(), lr=self.cfg.lr_Gs)
         optimizer_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.cfg.lr_D)
@@ -329,7 +336,7 @@ class SimpleGAN(GANBase):
                 ### Training the discriminator ###
                 self.discriminator.train(True)
 
-                z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64)  # [batch, window, 1]
+                z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
                 with torch.no_grad():
                     # [batch, window, 1] -> [batch, window]
                     g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
@@ -342,7 +349,7 @@ class SimpleGAN(GANBase):
                 
                 # [batch, window] -> [batch]
                 if self.cfg.noisy_input:
-                    noisy_batch_x = batch_x + noise_scale * torch.randn_like(batch_x)
+                    noisy_batch_x = batch_x + noise_scale * torch.randn_like(batch_x, device=self.device)
                     if self.disc_type == "lstm":
                         d_D = self.discriminator.prep_and_forward(noisy_batch_x)
                     else:
@@ -359,7 +366,7 @@ class SimpleGAN(GANBase):
                 optimizer_D.step()
 
                 ### Training the generator ###
-                z_G = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64)  # [batch, window, 1]
+                z_G = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
                 # [batch, window, 1] -> [batch, window]
                 g_G = self.seq_generator.forward(z_G)[0].squeeze(2)
 
@@ -515,7 +522,7 @@ class SimpleGAN(GANBase):
 
         self.seq_generator.train(training)
 
-        z_w = torch.randn(n_samples, generation_len, 1, dtype=torch.float64)  # [n_samples, generation_len, 1]
+        z_w = torch.randn(n_samples, generation_len, 1, dtype=torch.float64, device=self.device)  # [n_samples, generation_len, 1]
         
         if condit_seq_data is not None:
             assert condit_seq_data.shape[0] in [n_samples, 1], "Conditional seq data tensor must have dim(0) equal to n_samples or 1"
@@ -526,11 +533,11 @@ class SimpleGAN(GANBase):
             condit_seq_size = condit_seq_data.shape[1]
             n_layers = self.seq_generator.num_layers
 
-            z_c = torch.randn(n_samples, condit_seq_size-1, 1, dtype=torch.float64)  # [n_samples, condit_seq_size, 1]
+            z_c = torch.randn(n_samples, condit_seq_size-1, 1, dtype=torch.float64, device=self.device)  # [n_samples, condit_seq_size, 1]
             forced_hidden = condit_seq_data.unsqueeze(0) # [1, n_samples, condit_seq_size]
 
-            hidden = torch.zeros(n_layers, n_samples, 1, dtype=torch.float64) # [n_layers, n_samples, 1]
-            cell = torch.zeros(n_layers, n_samples, 1, dtype=torch.float64) # [n_layers, n_samples, 1]
+            hidden = torch.zeros(n_layers, n_samples, 1, dtype=torch.float64, device=self.device) # [n_layers, n_samples, 1]
+            cell = torch.zeros(n_layers, n_samples, 1, dtype=torch.float64, device=self.device) # [n_layers, n_samples, 1]
 
             for t in range(condit_seq_size-1):
                 hidden[-1, :, :] = forced_hidden[:, :, t].unsqueeze(2) # last layer of hidden becomes forced
@@ -545,7 +552,7 @@ class SimpleGAN(GANBase):
             g = self.seq_generator.forward(z_w)[0].squeeze(2)
 
         if og_scale:
-            og_scale_g = torch.tensor(self.seq_scaler.inverse_transform(g.detach().numpy()))
+            og_scale_g = torch.tensor(self.seq_scaler.inverse_transform(g.detach().to("cpu").numpy()), dtype=torch.float64, device=self.device)
             return og_scale_g
         else:
             return g
