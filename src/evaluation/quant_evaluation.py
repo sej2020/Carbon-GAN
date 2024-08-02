@@ -80,11 +80,11 @@ class QuantEvaluation:
             Higher coverage values indicate better model performance
         """
         # Generated data
-        gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy()
+        gen_seq = self.gen_seq.flatten().unsqueeze(1).to("cpu").detach().numpy()
         kde_gen_seq = KernelDensity(kernel='gaussian', bandwidth='silverman')
         kde_gen_seq.fit(gen_seq) # [n_samples, 1]
         # Real data
-        real_seq = self.real_seq.detach().numpy()
+        real_seq = self.real_seq.to("cpu").detach().numpy()
         # Computing Coverage:
         gen_log_density_seq = kde_gen_seq.score_samples(gen_seq)
 
@@ -96,11 +96,11 @@ class QuantEvaluation:
         if not self.model.generates_metadata:
             return C_seq
         else:
-            gen_meta = self.gen_meta.detach().numpy()
+            gen_meta = self.gen_meta.to("cpu").detach().numpy()
             kde_gen_meta = KernelDensity(kernel='gaussian', bandwidth='silverman')
             kde_gen_meta.fit(gen_meta) # [n_samples, n_features]
             # Real data
-            real_meta = self.real_meta.detach().numpy()
+            real_meta = self.real_meta.to("cpu").detach().numpy()
             # Computing Coverage:
             gen_log_density_meta = kde_gen_meta.score_samples(gen_meta) # [batch, 1]
 
@@ -129,8 +129,8 @@ class QuantEvaluation:
         Notes:
             Higher bin overlap values indicate better model performance
         """
-        gen_seq = self.gen_seq.flatten().unsqueeze(1).detach().numpy()
-        real_seq = self.real_seq.detach().numpy()
+        gen_seq = self.gen_seq.flatten().unsqueeze(1).to("cpu").detach().numpy()
+        real_seq = self.real_seq.to("cpu").detach().numpy()
 
         # sequence of the left edge of n_bins bins equally spaced in the range of real_meta + one right edge
         bins = np.linspace(real_seq.min(), real_seq.max(), n_bins)
@@ -172,7 +172,7 @@ class QuantEvaluation:
                 x_t_hat = self.model.generate(n_samples=gen_per_sample, generation_len=1, og_scale=False, condit_seq_data=x_t_minus) # [gen_per_sample, 1]    
                 # creating x_t_hat distribution using KDE
                 kde = KernelDensity(kernel='gaussian', bandwidth='silverman')
-                kde.fit(x_t_hat.detach().numpy())
+                kde.fit(x_t_hat.to("cpu").detach().numpy())
                 # calculating the probability of x_t in x_t_hat distribution
                 x_t_prob = np.exp(kde.score_samples(x_t.reshape(-1,1)))
                 total_x_t_prob += x_t_prob.item()
@@ -223,7 +223,7 @@ class QuantEvaluation:
         criterion = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(post_hoc_disc.parameters(), lr=0.01)
         for epoch in range(500):
-            batch_x = train_set.detach().unsqueeze(2)
+            batch_x = train_set.to("cpu").detach().unsqueeze(2)
             _, (h, _) = post_hoc_disc(batch_x)
             h_bin = torch.sigmoid(h.squeeze())
             loss = criterion(h_bin, labels)

@@ -3,7 +3,7 @@ Searching over hyperparameters for finetuning the TEMPO model on energy insights
 
 Typical usage example:
 ```bash
->>> python -m src.actions.search_hp --device cuda --n_runs 8
+>>> python -m src.actions.search_hp simple --device cuda:0 --n_runs 8
 ```
 """
 
@@ -85,7 +85,7 @@ hp_search_trainer_config = {
         'min': 400
         },
     'batch_size': {
-        'values': [64, 256, 1024, 2048]
+        'values': [512, 1024, 2048, 4096]
         },
     'lr_Gs': {
         'distribution': 'uniform',
