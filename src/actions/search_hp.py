@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser("hyperparameter search SimpleGAN")
 parser.add_argument("model_type", type=str, choices=["simple"], help="Model to train")
 parser.add_argument("--debug", action=argparse.BooleanOptionalAction, default=False)
 parser.add_argument("--n_runs", type=int, default=1)
-parser.add_argument("--device", type=str, choices=["cpu", "cuda"], default="cpu")
+parser.add_argument("--device", type=str, default="cpu")
 
 # Training configuration
 parser.add_argument("--region", type=str, 

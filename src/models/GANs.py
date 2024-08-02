@@ -552,7 +552,7 @@ class SimpleGAN(GANBase):
             g = self.seq_generator.forward(z_w)[0].squeeze(2)
 
         if og_scale:
-            og_scale_g = torch.tensor(self.seq_scaler.inverse_transform(g.detach().to("cpu").numpy()), dtype=torch.float64, device=self.device)
+            og_scale_g = torch.tensor(self.seq_scaler.inverse_transform(g.to("cpu").detach().numpy()), dtype=torch.float64, device=self.device)
             return og_scale_g
         else:
             return g
