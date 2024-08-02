@@ -334,8 +334,7 @@ class SimpleGAN(GANBase):
                     break
 
                 ### Training the discriminator ###
-                self.discriminator.train(True)
-                self.seq_generator.train(False)
+                optimizer_D.zero_grad()
 
                 z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
 
@@ -361,14 +360,15 @@ class SimpleGAN(GANBase):
                     else:
                         d_D = self.discriminator.forward(batch_x)
 
-                optimizer_D.zero_grad()
                 loss_D = criterion_D(d_D, d_gD)
                 loss_D.backward()
                 optimizer_D.step()
+                optimizer_D.zero_grad()
+                
 
                 ### Training the generator ###
-                self.discriminator.train(False)
                 self.seq_generator.train(True)
+                optimizer_Gs.zero_grad()
 
                 z_G = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
                 # [batch, window, 1] -> [batch, window]
@@ -383,8 +383,6 @@ class SimpleGAN(GANBase):
                 if self.cfg.sup_loss:
                     batch_y_hat = self.generate(n_samples=self.cfg.batch_size, generation_len=1, og_scale=False, condit_seq_data=batch_x, training=True) # [batch, 1]    
 
-                optimizer_Gs.zero_grad()
-
                 if self.cfg.sup_loss:
                     loss_G = criterion_G(d_gG, batch_y_hat, batch_y)
                 else:
@@ -397,6 +395,8 @@ class SimpleGAN(GANBase):
                     print(f"Ep {epoch_n}.{b_idx}: Loss_D = {loss_D.item():.4}, Loss_G = {loss_G.item():.4}, G_s weight mag = {wms:.4}, G_s grad mag = {gms:.4}, D grad mag = {gmd:.4}")
 
                 optimizer_Gs.step()
+                optimizer_Gs.zero_grad()
+
 
                 epoch_loss_D.append(loss_D.item())
                 epoch_loss_G.append(loss_G.item())
@@ -425,7 +425,9 @@ class SimpleGAN(GANBase):
                             file.write(f"Epoch {epoch_n}: {norm_name} is NaN\n")
 
                 try:
+                    self.seq_generator.train(False)
                     eval_dict = self.evaluate()
+                    self.seq_generator.train(True)
                 except Exception as e:
                     print(f"Error in evaluation: {e}")
                     return f"{self.cfg.logging_dir}/{self.cfg.run_name}/", top_combined_score, epoch_at_top
