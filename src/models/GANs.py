@@ -576,16 +576,19 @@ class SimpleGAN(GANBase):
         wgt_mag_disc = 0
         # Monitoring gradients
         for weight in self.seq_generator.all_weights[0]:
-            grad_mag_seq += torch.norm(weight.grad).item()
+            if type(weight.grad) == torch.Tensor:
+                grad_mag_seq += torch.norm(weight.grad).item()
             wgt_mag_seq += torch.norm(weight).item()
         if self.disc_type == "lstm":
             for weight in self.discriminator.all_weights[0]:
-                grad_mag_disc += torch.norm(weight.grad).item()
+                if type(weight.grad) == torch.Tensor:
+                    grad_mag_disc += torch.norm(weight.grad).item()
                 wgt_mag_disc += torch.norm(weight).item()
         else:
             for layer in self.discriminator:
                 if hasattr(layer, "weight"):
-                    grad_mag_disc += torch.norm(layer.weight.grad).item()
+                    if type(layer.weight.grad) == torch.Tensor:
+                        grad_mag_disc += torch.norm(layer.weight.grad).item()
                     wgt_mag_disc += torch.norm(layer.weight).item()
         
         return {

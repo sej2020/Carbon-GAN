@@ -81,8 +81,8 @@ hp_search_trainer_config = {
     'elec_source': {'value': args.elec_source},
     'n_epochs': {
         'distribution': 'int_uniform',
-        'max': 1600,
-        'min': 400
+        'max': 60,
+        'min': 50
         },
     'batch_size': {
         'values': [512, 1024, 2048, 4096]
