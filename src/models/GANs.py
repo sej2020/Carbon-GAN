@@ -335,11 +335,12 @@ class SimpleGAN(GANBase):
 
                 ### Training the discriminator ###
                 self.discriminator.train(True)
+                self.seq_generator.train(False)
 
                 z_D = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
-                with torch.no_grad():
-                    # [batch, window, 1] -> [batch, window]
-                    g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
+
+                # [batch, window, 1] -> [batch, window]
+                g_D = self.seq_generator.forward(z_D)[0].squeeze(2)
                 if self.disc_type == "lstm":
                     # [batch, window] -> [batch]
                     d_gD = self.discriminator.prep_and_forward(g_D)
@@ -366,11 +367,13 @@ class SimpleGAN(GANBase):
                 optimizer_D.step()
 
                 ### Training the generator ###
+                self.discriminator.train(False)
+                self.seq_generator.train(True)
+
                 z_G = torch.randn(self.cfg.batch_size, self.window_size, 1, dtype=torch.float64, device=self.device)  # [batch, window, 1]
                 # [batch, window, 1] -> [batch, window]
                 g_G = self.seq_generator.forward(z_G)[0].squeeze(2)
 
-                self.discriminator.train(False)
                 # [batch, window] -> [batch]
                 if self.disc_type == "lstm":
                     d_gG = self.discriminator.prep_and_forward(g_G)
